@@ -1,0 +1,78 @@
+{
+  "entities": {
+    "Settings": {
+      "title": "Settings",
+      "description": "Campus and institutional settings",
+      "type": "object",
+      "properties": {
+        "collegeName": { "type": "string" },
+        "deptName": { "type": "string" },
+        "hodName": { "type": "string" },
+        "hodPasscode": { "type": "string" },
+        "defaulterThreshold": { "type": "number" }
+      }
+    },
+    "Classes": {
+      "title": "Classes",
+      "description": "Academic classes / divisions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "department": { "type": "string" },
+        "academicYear": { "type": "string" },
+        "semester": { "type": "string" },
+        "studentIds": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "Students": {
+      "title": "Students",
+      "description": "Enrolled student records",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "rollNo": { "type": "string" },
+        "name": { "type": "string" },
+        "parentPhone": { "type": "string" },
+        "gender": { "type": "string" },
+        "email": { "type": "string" }
+      }
+    },
+    "Teachers": {
+      "title": "Teachers",
+      "description": "Faculty members and assignments",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "uniqueCode": { "type": "string" },
+        "assignedClasses": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "Sessions": {
+      "title": "AttendanceSessions",
+      "description": "Attendance sessions and records",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string" },
+        "classId": { "type": "string" },
+        "lectureSlotId": { "type": "string" },
+        "subject": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "records": { "type": "object" }
+      }
+    }
+  },
+  "firestore": {
+    "collections": [
+      { "path": "campus_settings", "entity": "Settings" },
+      { "path": "campus_classes", "entity": "Classes" },
+      { "path": "campus_students", "entity": "Students" },
+      { "path": "campus_teachers", "entity": "Teachers" },
+      { "path": "campus_classrooms", "entity": "Classroom" },
+      { "path": "campus_timetable", "entity": "TimetableSlot" },
+      { "path": "campus_sessions", "entity": "Sessions" }
+    ]
+  }
+}

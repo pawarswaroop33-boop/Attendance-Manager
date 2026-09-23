@@ -1,0 +1,6 @@
+{
+  "name": "D.Y.PATIL TECHNICAL CAMPUS",
+  "description": "Official Attendance Management & Timetable ERP for D.Y.PATIL TECHNICAL CAMPUS. Real-time lecture tracking, HOD and faculty portals, defaulter alerts, and cloud sync.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
