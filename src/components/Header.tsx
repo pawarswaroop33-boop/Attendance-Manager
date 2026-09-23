@@ -36,6 +36,8 @@ interface HeaderProps {
   defaultersCount: number;
   cloudSyncing: boolean;
   isQuotaExhausted?: boolean;
+  onForceSync?: () => void;
+  activeDbProvider?: string;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -55,7 +57,9 @@ export const Header: React.FC<HeaderProps> = ({
   settings,
   defaultersCount,
   cloudSyncing,
-  isQuotaExhausted
+  isQuotaExhausted,
+  onForceSync,
+  activeDbProvider = 'Supabase'
 }) => {
   const currentClass = classes.find(c => c.id === selectedClassId) || classes[0];
 
@@ -103,19 +107,22 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Right Header Controls: Cloud Status & Sign Out */}
           <div className="flex items-center gap-1.5 shrink-0">
-            <div 
-              className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold ${
+            <button
+              type="button"
+              onClick={onForceSync}
+              disabled={cloudSyncing}
+              className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer border ${
                 isQuotaExhausted
-                  ? 'bg-amber-50 text-amber-800 border border-amber-200'
-                  : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                  ? 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
+                  : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100 active:scale-95'
               }`}
-              title={cloudSyncing ? 'Synchronizing with cloud...' : 'Cloud database connected'}
+              title={`Active Cloud Database: ${activeDbProvider}. Click to instantly force push/sync data to cloud.`}
             >
               <Cloud className={`w-3.5 h-3.5 ${cloudSyncing ? 'animate-pulse text-sky-600' : 'text-emerald-600'}`} />
-              <span className="hidden sm:inline">
-                {cloudSyncing ? 'Syncing...' : 'Cloud'}
+              <span>
+                {cloudSyncing ? 'Syncing...' : activeDbProvider}
               </span>
-            </div>
+            </button>
 
             <button
               type="button"

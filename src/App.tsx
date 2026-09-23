@@ -186,42 +186,61 @@ export default function App() {
       try {
         await dbService.init();
 
-        // Check if Firebase Firestore already has saved state (only if quota is not exhausted)
+        const cloudState = await dbService.loadCampusState();
+        const currentLocalStudentsCount = students.length;
+        const cloudStudentsCount = cloudState?.students?.length || 0;
+
+        // If cloud already has state and has at least as many students as local (or local only has default <= 20)
+        if (cloudState && (cloudStudentsCount >= currentLocalStudentsCount || currentLocalStudentsCount <= 20)) {
+          isRemoteUpdateRef.current = true;
+          if (cloudState.settings) setSettings(cloudState.settings);
+          if (cloudState.classes && cloudState.classes.length > 0) {
+            setClasses(cloudState.classes);
+            setSelectedClassId(prev => cloudState.classes.some(c => c.id === prev) ? prev : cloudState.classes[0].id);
+          }
+          if (cloudState.students && cloudState.students.length > 0) setStudents(cloudState.students);
+          if (cloudState.teachers && cloudState.teachers.length > 0) setTeachers(cloudState.teachers);
+          if (cloudState.classrooms && cloudState.classrooms.length > 0) setClassrooms(cloudState.classrooms);
+          if (cloudState.timetable && cloudState.timetable.length > 0) setTimetable(cloudState.timetable);
+          if (cloudState.sessions && cloudState.sessions.length > 0) setSessions(cloudState.sessions);
+          setTimeout(() => {
+            isRemoteUpdateRef.current = false;
+          }, 300);
+        } else if (currentLocalStudentsCount > cloudStudentsCount && currentLocalStudentsCount > 20) {
+          // Device 1 case: Local device has 85 enrolled students, but cloud has 0 or only default 20!
+          // Auto-push the 85 students to the cloud so that other devices can receive them
+          console.log(`[Auto-Push] Device has ${currentLocalStudentsCount} local students while cloud has ${cloudStudentsCount}. Pushing local state to cloud...`);
+          try {
+            await dbService.saveEntireCampusState({
+              settings,
+              classes,
+              students,
+              teachers,
+              classrooms,
+              timetable,
+              sessions
+            });
+            showToast(`Synchronized all ${currentLocalStudentsCount} students with cloud!`, 'success');
+          } catch (e) {
+            console.warn('[Auto-Push] Sync error:', e);
+          }
+        }
+
+        // Subscribe to live multi-device updates (only if free quota is not exhausted)
         if (!dbService.isQuotaExhausted) {
-          const cloudState = await dbService.loadCampusState();
-          if (cloudState) {
+          unsubscribe = dbService.subscribeToLiveUpdates((incoming) => {
             isRemoteUpdateRef.current = true;
-            if (cloudState.settings) setSettings(cloudState.settings);
-            if (cloudState.classes && cloudState.classes.length > 0) {
-              setClasses(cloudState.classes);
-              setSelectedClassId(prev => cloudState.classes.some(c => c.id === prev) ? prev : cloudState.classes[0].id);
-            }
-            if (cloudState.students && cloudState.students.length > 0) setStudents(cloudState.students);
-            if (cloudState.teachers && cloudState.teachers.length > 0) setTeachers(cloudState.teachers);
-            if (cloudState.classrooms && cloudState.classrooms.length > 0) setClassrooms(cloudState.classrooms);
-            if (cloudState.timetable && cloudState.timetable.length > 0) setTimetable(cloudState.timetable);
-            if (cloudState.sessions && cloudState.sessions.length > 0) setSessions(cloudState.sessions);
+            if (incoming.settings) setSettings(incoming.settings);
+            if (incoming.classes) setClasses(incoming.classes);
+            if (incoming.students) setStudents(incoming.students);
+            if (incoming.teachers) setTeachers(incoming.teachers);
+            if (incoming.classrooms) setClassrooms(incoming.classrooms);
+            if (incoming.timetable) setTimetable(incoming.timetable);
+            if (incoming.sessions) setSessions(incoming.sessions);
             setTimeout(() => {
               isRemoteUpdateRef.current = false;
             }, 300);
-          }
-
-          // Subscribe to live multi-device updates (only if free quota is not exhausted)
-          if (!dbService.isQuotaExhausted) {
-            unsubscribe = dbService.subscribeToLiveUpdates((incoming) => {
-              isRemoteUpdateRef.current = true;
-              if (incoming.settings) setSettings(incoming.settings);
-              if (incoming.classes) setClasses(incoming.classes);
-              if (incoming.students) setStudents(incoming.students);
-              if (incoming.teachers) setTeachers(incoming.teachers);
-              if (incoming.classrooms) setClassrooms(incoming.classrooms);
-              if (incoming.timetable) setTimetable(incoming.timetable);
-              if (incoming.sessions) setSessions(incoming.sessions);
-              setTimeout(() => {
-                isRemoteUpdateRef.current = false;
-              }, 300);
-            });
-          }
+          });
         }
 
         // Establish initial hash baseline so initial page load does not trigger an immediate write
@@ -229,7 +248,7 @@ export default function App() {
         setIsDbReady(true);
         setSavedIndicator(true);
       } catch (err) {
-        console.warn('Firebase sync notice:', err);
+        console.warn('Database sync notice:', err);
       } finally {
         setCloudSyncing(false);
       }
@@ -945,6 +964,8 @@ export default function App() {
         defaultersCount={defaultersCount}
         cloudSyncing={cloudSyncing}
         isQuotaExhausted={dbService.isQuotaExhausted}
+        onForceSync={handleForceSyncCloud}
+        activeDbProvider={dbService.currentProvider === 'supabase' ? 'Supabase' : 'Firebase'}
       />
 
       {/* Active Lecture Banner (Req 13) */}

@@ -1174,26 +1174,26 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-3 border-t border-slate-800">
                 <div className="bg-slate-900/80 rounded-xl p-3 border border-slate-800">
                   <span className="text-[10px] font-bold uppercase text-slate-400 block mb-0.5">Project Name</span>
-                  <span className="text-xs font-semibold text-white truncate block" title="pawarswaroop33@gmail.com's Project">
-                    pawarswaroop33's Project
+                  <span className="text-xs font-semibold text-white truncate block" title="attendance">
+                    attendance
                   </span>
                 </div>
                 <div className="bg-slate-900/80 rounded-xl p-3 border border-slate-800">
                   <span className="text-[10px] font-bold uppercase text-slate-400 block mb-0.5">Supabase Project ID</span>
                   <span className="text-xs font-mono font-bold text-emerald-300 truncate block">
-                    nwfugweckpnozbfoxtov
+                    lascgvyktowhgrfcnqbp
                   </span>
                 </div>
                 <div className="bg-slate-900/80 rounded-xl p-3 border border-slate-800">
                   <span className="text-[10px] font-bold uppercase text-slate-400 block mb-0.5">Endpoint URL</span>
-                  <span className="text-xs font-mono text-sky-300 truncate block" title="https://nwfugweckpnozbfoxtov.supabase.co">
-                    https://nwfugweckpnozbfoxtov...
+                  <span className="text-xs font-mono text-sky-300 truncate block" title="https://lascgvyktowhgrfcnqbp.supabase.co">
+                    https://lascgvyktowhgrfcnqbp...
                   </span>
                 </div>
                 <div className="bg-slate-900/80 rounded-xl p-3 border border-slate-800">
                   <span className="text-[10px] font-bold uppercase text-slate-400 block mb-0.5">Public Key</span>
-                  <span className="text-xs font-mono text-slate-400 truncate block" title="sb_publishable_dqiR-13ExmSqZqRc1u93pg_xSuzrXr7">
-                    sb_publishable_dqiR...
+                  <span className="text-xs font-mono text-slate-400 truncate block" title="sb_publishable_TnPeA9j7P_JkSTa4VpEQRw_xYI3_59R">
+                    sb_publishable_TnPe...
                   </span>
                 </div>
               </div>
@@ -1307,7 +1307,7 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
 
               <div className="flex flex-wrap items-center gap-2">
                 <a
-                  href="https://supabase.com/dashboard/project/nwfugweckpnozbfoxtov/sql/new"
+                  href="https://supabase.com/dashboard/project/lascgvyktowhgrfcnqbp/sql/new"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-xs cursor-pointer"

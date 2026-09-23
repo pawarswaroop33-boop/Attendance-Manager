@@ -10,10 +10,10 @@ import {
   SystemSettings 
 } from '../types';
 
-export const DEFAULT_SUPABASE_URL = 'https://nwfugweckpnozbfoxtov.supabase.co';
-export const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_dqiR-13ExmSqZqRc1u93pg_xSuzrXr7';
-export const DEFAULT_SUPABASE_PROJECT_ID = 'nwfugweckpnozbfoxtov';
-export const DEFAULT_SUPABASE_PROJECT_NAME = "pawarswaroop33@gmail.com's Project";
+export const DEFAULT_SUPABASE_URL = 'https://lascgvyktowhgrfcnqbp.supabase.co';
+export const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_TnPeA9j7P_JkSTa4VpEQRw_xYI3_59R';
+export const DEFAULT_SUPABASE_PROJECT_ID = 'lascgvyktowhgrfcnqbp';
+export const DEFAULT_SUPABASE_PROJECT_NAME = 'attendance';
 
 const STORAGE_KEY_SUPABASE_URL = 'dypatil_supabase_url';
 const STORAGE_KEY_SUPABASE_KEY = 'dypatil_supabase_anon_key';
@@ -36,6 +36,22 @@ export class SupabaseDatabaseAdapter implements CampusDatabaseAdapter {
     }
     if (!resolvedKey && typeof localStorage !== 'undefined') {
       resolvedKey = localStorage.getItem(STORAGE_KEY_SUPABASE_KEY) || '';
+    }
+
+    // Auto-migrate from any old placeholder projects to user's specified project
+    if (
+      !resolvedUrl || 
+      resolvedUrl.includes('nwfugweckpnozbfoxtov') || 
+      resolvedKey.includes('dqiR-13ExmSqZqRc1u93pg')
+    ) {
+      resolvedUrl = DEFAULT_SUPABASE_URL;
+      resolvedKey = DEFAULT_SUPABASE_ANON_KEY;
+      if (typeof localStorage !== 'undefined') {
+        try {
+          localStorage.setItem(STORAGE_KEY_SUPABASE_URL, DEFAULT_SUPABASE_URL);
+          localStorage.setItem(STORAGE_KEY_SUPABASE_KEY, DEFAULT_SUPABASE_ANON_KEY);
+        } catch (_) {}
+      }
     }
 
     if (!resolvedUrl && typeof import.meta !== 'undefined') {
@@ -74,6 +90,10 @@ export class SupabaseDatabaseAdapter implements CampusDatabaseAdapter {
 
   get tablesVerified(): boolean {
     return this._tablesVerified;
+  }
+
+  get isQuotaExhausted(): boolean {
+    return false;
   }
 
   get lastError(): string | null {
@@ -142,17 +162,20 @@ export class SupabaseDatabaseAdapter implements CampusDatabaseAdapter {
     if (!this.client) return null;
 
     try {
-      // 1. Try to load from master campus_state snapshot
+      // 1. Try to load from master campus_state snapshot (supports both 'state' and 'data' columns)
       const { data: snapshotData, error: snapErr } = await this.client
         .from('campus_state')
-        .select('data')
+        .select('*')
         .eq('id', 'current')
         .maybeSingle();
 
-      if (!snapErr && snapshotData?.data) {
-        this._isConnected = true;
-        this._tablesVerified = true;
-        return snapshotData.data as CampusState;
+      if (!snapErr && snapshotData) {
+        const rawState = (snapshotData as any).state || (snapshotData as any).data;
+        if (rawState && typeof rawState === 'object') {
+          this._isConnected = true;
+          this._tablesVerified = true;
+          return rawState as CampusState;
+        }
       }
 
       // 2. Alternatively, attempt reading relational tables
@@ -284,23 +307,39 @@ export class SupabaseDatabaseAdapter implements CampusDatabaseAdapter {
     if (!this.client) return;
 
     try {
+      const payload = {
+        ...state,
+        settings: {
+          ...state.settings,
+          cloudSyncStatus: 'synced',
+          lastCloudSyncTimestamp: new Date().toISOString()
+        }
+      };
+
       // 1. Save master state snapshot (guarantees complete preservation)
-      const { error: snapError } = await this.client
+      // Attempt upsert with 'state' column first (which is the actual column in Supabase PostgreSQL)
+      let snapError: any = null;
+      const resState = await this.client
         .from('campus_state')
         .upsert({
           id: 'current',
-          data: {
-            ...state,
-            settings: {
-              ...state.settings,
-              cloudSyncStatus: 'synced',
-              lastCloudSyncTimestamp: new Date().toISOString()
-            }
-          },
+          state: payload,
           updated_at: new Date().toISOString()
         });
 
-      if (snapError && (snapError.code === 'PGRST205' || snapError.message.includes('schema cache'))) {
+      if (resState.error) {
+        // Fallback to 'data' column if table was created with 'data'
+        const resData = await this.client
+          .from('campus_state')
+          .upsert({
+            id: 'current',
+            data: payload,
+            updated_at: new Date().toISOString()
+          });
+        snapError = resData.error;
+      }
+
+      if (snapError && (snapError.code === 'PGRST205' || snapError.message?.includes('schema cache'))) {
         this._tablesVerified = false;
         this._lastError = 'Tables need to be created. Please run the SQL schema in Supabase SQL editor.';
         throw new Error('Supabase tables have not been created yet. Please copy and execute the SQL Schema in your Supabase SQL editor.');
@@ -619,8 +658,9 @@ export class SupabaseDatabaseAdapter implements CampusDatabaseAdapter {
           'postgres_changes',
           { event: '*', schema: 'public', table: 'campus_state' },
           (payload: any) => {
-            if (payload?.new?.data) {
-              onUpdate(payload.new.data as Partial<CampusState>);
+            const raw = payload?.new?.state || payload?.new?.data;
+            if (raw && typeof raw === 'object') {
+              onUpdate(raw as Partial<CampusState>);
             }
           }
         )
@@ -647,7 +687,7 @@ export class SupabaseDatabaseAdapter implements CampusDatabaseAdapter {
     return `-- ========================================================
 -- D.Y.PATIL TECHNICAL CAMPUS ATTENDANCE ERP
 -- Supabase PostgreSQL Schema & Real-Time Sync Setup
--- Project: pawarswaroop33@gmail.com's Project
+-- Project: attendance (ID: lascgvyktowhgrfcnqbp)
 -- ========================================================
 
 -- 1. Enable UUID Extension
@@ -656,7 +696,9 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- 2. Master Campus State Snapshot (Instant 1-Click Sync Table)
 CREATE TABLE IF NOT EXISTS campus_state (
   id TEXT PRIMARY KEY DEFAULT 'current',
-  data JSONB NOT NULL,
+  state JSONB DEFAULT '{}'::jsonb,
+  data JSONB DEFAULT '{}'::jsonb,
+  version INT DEFAULT 1,
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 

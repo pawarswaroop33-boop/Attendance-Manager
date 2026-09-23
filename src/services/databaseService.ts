@@ -96,11 +96,70 @@ class CampusDatabaseService {
   }
 
   async loadCampusState(): Promise<CampusState | null> {
-    return await this.adapter.loadCampusState();
+    try {
+      const primaryState = await this.adapter.loadCampusState();
+      if (primaryState && primaryState.students && primaryState.students.length > 0) {
+        return primaryState;
+      }
+
+      // If active provider had no data or tables aren't initialized yet, check fallback provider (Firestore)
+      const secondary = this.activeProvider === 'supabase' ? this.firebaseAdapter : this.supabaseAdapter;
+      try {
+        const secondaryState = await secondary.loadCampusState();
+        if (secondaryState && secondaryState.students && secondaryState.students.length > 0) {
+          console.log(`[DB Service] Loaded complete campus state (${secondaryState.students.length} students) from backup: ${secondary.providerName}`);
+          return secondaryState;
+        }
+      } catch (secErr) {
+        console.warn('[DB Service] Secondary load notice:', secErr);
+      }
+
+      return primaryState;
+    } catch (e) {
+      console.warn('loadCampusState warning:', e);
+      // Try secondary in case primary threw an error (e.g. table not found in Supabase)
+      try {
+        const secondary = this.activeProvider === 'supabase' ? this.firebaseAdapter : this.supabaseAdapter;
+        const secondaryState = await secondary.loadCampusState();
+        if (secondaryState && secondaryState.students && secondaryState.students.length > 0) {
+          return secondaryState;
+        }
+      } catch (_) {}
+      return null;
+    }
   }
 
   async saveEntireCampusState(state: CampusState): Promise<void> {
-    await this.adapter.saveEntireCampusState(state);
+    let primaryError: any = null;
+
+    // 1. Attempt save to currently active provider (Supabase)
+    try {
+      await this.adapter.saveEntireCampusState(state);
+    } catch (err) {
+      primaryError = err;
+      console.warn(`[DB Service] Primary provider (${this.activeProvider}) save notice:`, err);
+    }
+
+    // 2. Cross-cloud backup mirror: Always ensure Firestore holds a full replica so data is NEVER lost
+    try {
+      const secondary = this.activeProvider === 'supabase' ? this.firebaseAdapter : this.supabaseAdapter;
+      if (secondary.providerName === 'firebase') {
+        if (!this.firebaseAdapter.isQuotaExhausted) {
+          await this.firebaseAdapter.saveEntireCampusState(state).catch(e => {
+            console.warn('[Firebase Mirror Backup Notice]', e);
+          });
+        }
+      } else {
+        await this.supabaseAdapter.saveEntireCampusState(state).catch(e => {
+          console.warn('[Supabase Mirror Backup Notice]', e);
+        });
+      }
+    } catch (_) {}
+
+    // If primary provider had an issue (e.g. Supabase tables need to be created), notify caller
+    if (primaryError) {
+      throw primaryError;
+    }
   }
 
   async saveSettings(settings: SystemSettings): Promise<void> {
