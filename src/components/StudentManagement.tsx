@@ -166,17 +166,17 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap w-full sm:w-auto">
+        <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 w-full sm:w-auto">
           {onOpenImportModal && (
             <button
               id="import-modal-trigger-btn"
               type="button"
               onClick={onOpenImportModal}
-              className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-xs transition-all shadow-xs cursor-pointer shrink-0"
+              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-xs transition-all shadow-xs cursor-pointer min-h-[40px]"
               title="Import student roll list from Excel / PDF"
             >
               <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Scan Excel / PDF</span>
+              <span>Scan List</span>
             </button>
           )}
 
@@ -184,7 +184,7 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
             id="add-student-button"
             type="button"
             onClick={handleStartAdd}
-            className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition-all shadow-xs cursor-pointer shrink-0"
+            className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition-all shadow-xs cursor-pointer min-h-[40px]"
           >
             <UserPlus className="w-3.5 h-3.5" />
             <span>Add Student</span>
@@ -196,11 +196,11 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
               id="delete-all-students-btn"
               type="button"
               onClick={() => setShowDeleteAllModal(true)}
-              className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 font-bold text-xs transition-all shadow-xs cursor-pointer shrink-0"
+              className="col-span-2 sm:col-span-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 font-bold text-xs transition-all shadow-xs cursor-pointer min-h-[40px]"
               title="Delete all students from roster"
             >
               <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-              <span>Delete All Students</span>
+              <span>Clear Roster</span>
             </button>
           )}
         </div>

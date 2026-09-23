@@ -31,10 +31,12 @@ import {
   Download,
   ArrowRightLeft,
   CheckCircle2,
-  Code
+  Code,
+  ExternalLink
 } from 'lucide-react';
-import { Teacher, Classroom, TimetableSlot, ClassGroup, SystemSettings, DayOfWeek, Student } from '../types';
+import { Teacher, Classroom, TimetableSlot, ClassGroup, SystemSettings, DayOfWeek, Student, AttendanceSession } from '../types';
 import { dbService } from '../services/databaseService';
+import { DatabaseProviderType } from '../services/dbInterface';
 
 interface HodControlCenterProps {
   settings: SystemSettings;
@@ -62,6 +64,7 @@ interface HodControlCenterProps {
   onOpenImportModal: () => void;
   onForceSyncCloud?: () => void;
   isCloudSyncing?: boolean;
+  sessions?: AttendanceSession[];
 }
 
 export const HodControlCenter: React.FC<HodControlCenterProps> = ({
@@ -89,10 +92,14 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
   onResetAllData,
   onOpenImportModal,
   onForceSyncCloud,
-  isCloudSyncing
+  isCloudSyncing,
+  sessions = []
 }) => {
   const [activeTab, setActiveTab] = useState<'students' | 'teachers' | 'timetable' | 'classrooms' | 'classes' | 'settings' | 'database'>('students');
   const [copiedSchema, setCopiedSchema] = useState(false);
+  const [activeProvider, setActiveProvider] = useState<DatabaseProviderType>(dbService.currentProvider);
+  const [isPushingToSupabase, setIsPushingToSupabase] = useState(false);
+  const [supabaseSyncMsg, setSupabaseSyncMsg] = useState<{ text: string; type: 'success' | 'warning' | 'error' } | null>(null);
 
   // Synchronized Settings State
   const [collegeName, setCollegeName] = useState(settings.collegeName);
@@ -322,20 +329,17 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
     <div className="space-y-6">
       
       {/* Top Banner */}
-      <div className="bg-slate-900 text-white rounded-2xl p-4 sm:p-6 shadow-md border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-slate-900 text-white rounded-2xl p-4 sm:p-5 shadow-md border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/30">
-            <ShieldCheck className="w-6 h-6" />
+          <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/30">
+            <ShieldCheck className="w-5 h-5" />
           </div>
           <div>
-            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold uppercase mb-1 border border-amber-500/30">
-              Department Governance
-            </div>
-            <h1 className="text-base sm:text-xl font-extrabold text-white">
-              HOD Control Center & ERP Administration
+            <h1 className="text-sm sm:text-base font-extrabold text-white">
+              HOD Control Center
             </h1>
             <p className="text-xs text-slate-400">
-              {settings.hodName} &bull; {settings.departmentName} &bull; {settings.collegeName}
+              {settings.hodName} &bull; {settings.departmentName}
             </p>
           </div>
         </div>
@@ -345,29 +349,29 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
           id="hod-reset-campus-btn"
           type="button"
           onClick={() => setShowResetCampusModal(true)}
-          className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 border border-rose-700/60 text-rose-300 hover:text-white text-xs font-bold transition-all cursor-pointer shadow-xs"
+          className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 border border-rose-700/60 text-rose-300 hover:text-white text-xs font-bold transition-all cursor-pointer shadow-xs min-h-[38px] self-start sm:self-auto"
         >
           <RotateCcw className="w-3.5 h-3.5" />
           <span>Reset Campus System</span>
         </button>
       </div>
 
-      {/* Tabs */}
-      <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2 overflow-x-auto no-scrollbar">
+      {/* Tabs - Smooth horizontal scroll on mobile */}
+      <div className="flex items-center gap-1.5 border-b border-slate-200 pb-2 overflow-x-auto no-scrollbar">
         
-        {/* Tab: Students Management */}
+        {/* Tab: Students */}
         <button
           id="hod-tab-students"
           type="button"
           onClick={() => setActiveTab('students')}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 min-h-[38px] ${
             activeTab === 'students'
               ? 'bg-slate-900 text-white shadow-xs'
               : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
           }`}
         >
           <GraduationCap className="w-4 h-4 text-amber-400" />
-          <span>Students & Roster ({students.length})</span>
+          <span>Students ({students.length})</span>
         </button>
 
         {/* Tab: Teachers */}
@@ -375,14 +379,14 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
           id="hod-tab-teachers"
           type="button"
           onClick={() => setActiveTab('teachers')}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 min-h-[38px] ${
             activeTab === 'teachers'
               ? 'bg-slate-900 text-white shadow-xs'
               : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
           }`}
         >
           <Users className="w-4 h-4 text-emerald-400" />
-          <span>Teachers & Codes ({teachers.length})</span>
+          <span>Faculty ({teachers.length})</span>
         </button>
 
         {/* Tab: Timetable */}
@@ -390,7 +394,7 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
           id="hod-tab-timetable"
           type="button"
           onClick={() => setActiveTab('timetable')}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 min-h-[38px] ${
             activeTab === 'timetable'
               ? 'bg-slate-900 text-white shadow-xs'
               : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
@@ -405,14 +409,14 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
           id="hod-tab-classrooms"
           type="button"
           onClick={() => setActiveTab('classrooms')}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 min-h-[38px] ${
             activeTab === 'classrooms'
               ? 'bg-slate-900 text-white shadow-xs'
               : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
           }`}
         >
           <Building className="w-4 h-4 text-indigo-400" />
-          <span>Classrooms & Labs ({classrooms.length})</span>
+          <span>Classrooms ({classrooms.length})</span>
         </button>
 
         {/* Tab: Settings */}
@@ -420,34 +424,29 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
           id="hod-tab-settings"
           type="button"
           onClick={() => setActiveTab('settings')}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 min-h-[38px] ${
             activeTab === 'settings'
               ? 'bg-slate-900 text-white shadow-xs'
               : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
           }`}
         >
           <Settings className="w-4 h-4 text-amber-400" />
-          <span>Campus & System Settings</span>
+          <span>Settings</span>
         </button>
 
-        {/* Tab: Database & Supabase Migration (Req: Firebase enabled & Supabase ready) */}
+        {/* Tab: Database */}
         <button
           id="hod-tab-database"
           type="button"
           onClick={() => setActiveTab('database')}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 min-h-[38px] ${
             activeTab === 'database'
               ? 'bg-emerald-600 text-white shadow-xs'
               : 'bg-white text-emerald-700 hover:bg-emerald-50 border border-emerald-200'
           }`}
         >
           <Database className="w-4 h-4" />
-          <span>Database & Cloud Sync</span>
-          <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded-full ${
-            activeTab === 'database' ? 'bg-white text-emerald-800' : 'bg-emerald-100 text-emerald-900'
-          }`}>
-            Firebase Live
-          </span>
+          <span>Database</span>
         </button>
       </div>
 
@@ -1017,76 +1016,259 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
       {activeTab === 'database' && (
         <div className="space-y-6">
           
-          {/* Active Database Banner */}
-          <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 rounded-2xl p-5 sm:p-6 text-white border border-slate-700 shadow-md">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold uppercase tracking-wider">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                    Active Primary Provider
-                  </span>
-                  <span className="text-[10px] text-slate-400 font-mono">
-                    Firestore Rules Deployed
-                  </span>
-                </div>
-                <h2 className="text-lg sm:text-xl font-extrabold flex items-center gap-2">
-                  <Database className="w-5 h-5 text-emerald-400" />
-                  <span>Google Cloud Firebase Firestore</span>
-                </h2>
-                <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
-                  All campus attendance records, student rosters, timetable lectures, and institutional settings are securely synchronized in real-time across devices.
-                </p>
+          {/* Provider Selector Switcher */}
+          <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                Database Engine Selection
               </div>
+              <h3 className="text-base font-bold text-slate-900">
+                Active Campus Database Provider
+              </h3>
+              <p className="text-xs text-slate-500">
+                Switch between Supabase PostgreSQL and Google Cloud Firebase with 0 data loss.
+              </p>
+            </div>
 
-              {/* Force Sync Action */}
-              <div className="flex items-center gap-2 shrink-0">
-                {onForceSyncCloud && (
-                  <button
-                    type="button"
-                    onClick={onForceSyncCloud}
-                    disabled={isCloudSyncing}
-                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-slate-950 text-xs font-bold transition-all shadow-sm cursor-pointer disabled:opacity-50"
-                  >
-                    <Cloud className={`w-4 h-4 ${isCloudSyncing ? 'animate-pulse' : ''}`} />
-                    <span>{isCloudSyncing ? 'Synchronizing...' : 'Force Push to Cloud'}</span>
-                  </button>
+            <div className="flex items-center gap-2 p-1 bg-slate-100 rounded-xl border border-slate-200">
+              <button
+                type="button"
+                onClick={() => {
+                  dbService.setProvider('supabase');
+                  setActiveProvider('supabase');
+                }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  activeProvider === 'supabase'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Database className="w-3.5 h-3.5" />
+                <span>Supabase PostgreSQL</span>
+                {activeProvider === 'supabase' && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
                 )}
-              </div>
-            </div>
+              </button>
 
-            {/* Connection Credentials Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-5 pt-4 border-t border-slate-700/80">
-              <div className="bg-slate-800/60 rounded-xl p-3 border border-slate-700">
-                <span className="text-[10px] font-bold uppercase text-slate-400 block mb-0.5">Firebase Project ID</span>
-                <span className="text-xs font-mono font-bold text-emerald-300 truncate block">robotic-quanta-2mln4</span>
-              </div>
-              <div className="bg-slate-800/60 rounded-xl p-3 border border-slate-700">
-                <span className="text-[10px] font-bold uppercase text-slate-400 block mb-0.5">Named Firestore DB</span>
-                <span className="text-xs font-mono font-bold text-sky-300 truncate block" title="ai-studio-dypatiltechnical-2db2d2f0-88f1-4cba-9c2f-dba9f6aab366">
-                  ai-studio-dypatiltechnical...
-                </span>
-              </div>
-              <div className="bg-slate-800/60 rounded-xl p-3 border border-slate-700">
-                <span className="text-[10px] font-bold uppercase text-slate-400 block mb-0.5">Current Scope</span>
-                <span className="text-xs font-semibold text-amber-300 truncate block">
-                  ECE - Div A (Single Division)
-                </span>
-              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  dbService.setProvider('firebase');
+                  setActiveProvider('firebase');
+                }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  activeProvider === 'firebase'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Server className="w-3.5 h-3.5" />
+                <span>Firebase Firestore</span>
+                {activeProvider === 'firebase' && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                )}
+              </button>
             </div>
+          </div>
 
-            {dbService.isQuotaExhausted && (
-              <div className="mt-4 p-3.5 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-200 text-xs flex items-start gap-2.5">
-                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                <div className="space-y-1">
-                  <div className="font-bold text-amber-300">Firebase Free Daily Write Limit Reached</div>
-                  <p className="text-[11px] text-amber-200 leading-relaxed">
-                    Google Cloud Firestore free-tier daily write quota has been reached. Offline-first local storage is actively preserving all attendance sessions, students, and settings in your browser with zero data loss. Cloud synchronization will resume once the daily quota resets, or you can migrate to Supabase below.
+          {/* Active Database Banner */}
+          {activeProvider === 'supabase' ? (
+            <div className="bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 rounded-2xl p-5 sm:p-6 text-white border border-emerald-900/50 shadow-md space-y-5">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold uppercase tracking-wider">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                      Active Database Provider
+                    </span>
+                    <span className="text-[10px] text-emerald-300/80 font-mono">
+                      Supabase PostgreSQL Client Connected
+                    </span>
+                  </div>
+                  <h2 className="text-lg sm:text-xl font-extrabold flex items-center gap-2">
+                    <Database className="w-5 h-5 text-emerald-400" />
+                    <span>Supabase PostgreSQL Database</span>
+                  </h2>
+                  <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
+                    Student rosters, attendance sessions, timetable schedules, classroom mappings, and campus settings are actively configured to store directly in your Supabase project.
                   </p>
                 </div>
+
+                {/* Push All Data to Supabase Action */}
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setIsPushingToSupabase(true);
+                      setSupabaseSyncMsg(null);
+                      try {
+                        let currentSessions = sessions;
+                        if (!currentSessions || currentSessions.length === 0) {
+                          try {
+                            const stored = localStorage.getItem('dypatil_sessions_v1');
+                            if (stored) currentSessions = JSON.parse(stored);
+                          } catch (_) {}
+                        }
+
+                        await dbService.supabase.saveEntireCampusState({
+                          settings,
+                          classes,
+                          students,
+                          teachers,
+                          classrooms,
+                          timetable,
+                          sessions: currentSessions
+                        });
+
+                        setSupabaseSyncMsg({
+                          text: `Successfully synced all ${students.length} students, ${classes.length} classes, and attendance records to Supabase!`,
+                          type: 'success'
+                        });
+                      } catch (err: any) {
+                        if (err?.message?.includes('tables have not been created') || err?.message?.includes('schema cache')) {
+                          setSupabaseSyncMsg({
+                            text: 'Supabase connected! Please copy and execute the SQL Schema below in your Supabase SQL Editor to initialize all tables.',
+                            type: 'warning'
+                          });
+                        } else {
+                          setSupabaseSyncMsg({
+                            text: `Sync notice: ${err?.message || 'Check connection'}`,
+                            type: 'warning'
+                          });
+                        }
+                      } finally {
+                        setIsPushingToSupabase(false);
+                      }
+                    }}
+                    disabled={isPushingToSupabase}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-slate-950 text-xs font-bold transition-all shadow-sm cursor-pointer disabled:opacity-50"
+                  >
+                    <Cloud className={`w-4 h-4 ${isPushingToSupabase ? 'animate-pulse' : ''}`} />
+                    <span>{isPushingToSupabase ? 'Storing to Supabase...' : 'Push All Data to Supabase Now'}</span>
+                  </button>
+                </div>
               </div>
-            )}
-          </div>
+
+              {/* Supabase Notification Alert */}
+              {supabaseSyncMsg && (
+                <div className={`p-3.5 rounded-xl border text-xs flex items-start gap-2.5 ${
+                  supabaseSyncMsg.type === 'success'
+                    ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-200'
+                    : supabaseSyncMsg.type === 'warning'
+                    ? 'bg-amber-500/20 border-amber-500/40 text-amber-200'
+                    : 'bg-rose-500/20 border-rose-500/40 text-rose-200'
+                }`}>
+                  {supabaseSyncMsg.type === 'success' ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  )}
+                  <div className="space-y-1">
+                    <div className="font-bold">{supabaseSyncMsg.type === 'success' ? 'Synchronized' : 'Notice'}</div>
+                    <p className="text-[11px] leading-relaxed">{supabaseSyncMsg.text}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Supabase Credentials Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-3 border-t border-slate-800">
+                <div className="bg-slate-900/80 rounded-xl p-3 border border-slate-800">
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block mb-0.5">Project Name</span>
+                  <span className="text-xs font-semibold text-white truncate block" title="pawarswaroop33@gmail.com's Project">
+                    pawarswaroop33's Project
+                  </span>
+                </div>
+                <div className="bg-slate-900/80 rounded-xl p-3 border border-slate-800">
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block mb-0.5">Supabase Project ID</span>
+                  <span className="text-xs font-mono font-bold text-emerald-300 truncate block">
+                    nwfugweckpnozbfoxtov
+                  </span>
+                </div>
+                <div className="bg-slate-900/80 rounded-xl p-3 border border-slate-800">
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block mb-0.5">Endpoint URL</span>
+                  <span className="text-xs font-mono text-sky-300 truncate block" title="https://nwfugweckpnozbfoxtov.supabase.co">
+                    https://nwfugweckpnozbfoxtov...
+                  </span>
+                </div>
+                <div className="bg-slate-900/80 rounded-xl p-3 border border-slate-800">
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block mb-0.5">Public Key</span>
+                  <span className="text-xs font-mono text-slate-400 truncate block" title="sb_publishable_dqiR-13ExmSqZqRc1u93pg_xSuzrXr7">
+                    sb_publishable_dqiR...
+                  </span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 rounded-2xl p-5 sm:p-6 text-white border border-slate-700 shadow-md">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold uppercase tracking-wider">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                      Active Primary Provider
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      Firestore Rules Deployed
+                    </span>
+                  </div>
+                  <h2 className="text-lg sm:text-xl font-extrabold flex items-center gap-2">
+                    <Database className="w-5 h-5 text-emerald-400" />
+                    <span>Google Cloud Firebase Firestore</span>
+                  </h2>
+                  <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
+                    All campus attendance records, student rosters, timetable lectures, and institutional settings are synchronized with Google Cloud Firestore.
+                  </p>
+                </div>
+
+                {/* Force Sync Action */}
+                <div className="flex items-center gap-2 shrink-0">
+                  {onForceSyncCloud && (
+                    <button
+                      type="button"
+                      onClick={onForceSyncCloud}
+                      disabled={isCloudSyncing}
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-slate-950 text-xs font-bold transition-all shadow-sm cursor-pointer disabled:opacity-50"
+                    >
+                      <Cloud className={`w-4 h-4 ${isCloudSyncing ? 'animate-pulse' : ''}`} />
+                      <span>{isCloudSyncing ? 'Synchronizing...' : 'Force Push to Cloud'}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Connection Credentials Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-5 pt-4 border-t border-slate-700/80">
+                <div className="bg-slate-800/60 rounded-xl p-3 border border-slate-700">
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block mb-0.5">Firebase Project ID</span>
+                  <span className="text-xs font-mono font-bold text-emerald-300 truncate block">robotic-quanta-2mln4</span>
+                </div>
+                <div className="bg-slate-800/60 rounded-xl p-3 border border-slate-700">
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block mb-0.5">Named Firestore DB</span>
+                  <span className="text-xs font-mono font-bold text-sky-300 truncate block" title="ai-studio-dypatiltechnical-2db2d2f0-88f1-4cba-9c2f-dba9f6aab366">
+                    ai-studio-dypatiltechnical...
+                  </span>
+                </div>
+                <div className="bg-slate-800/60 rounded-xl p-3 border border-slate-700">
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block mb-0.5">Current Scope</span>
+                  <span className="text-xs font-semibold text-amber-300 truncate block">
+                    ECE - Div A (Single Division)
+                  </span>
+                </div>
+              </div>
+
+              {dbService.isQuotaExhausted && (
+                <div className="mt-4 p-3.5 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-200 text-xs flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <div className="font-bold text-amber-300">Firebase Free Daily Write Limit Reached</div>
+                    <p className="text-[11px] text-amber-200 leading-relaxed">
+                      Google Cloud Firestore free-tier daily write quota has been reached. Offline-first local storage is actively preserving all attendance sessions, students, and settings in your browser with zero data loss. Cloud synchronization will resume once the daily quota resets, or you can migrate to Supabase below.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Academic Division Scope Notice */}
           <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -1107,23 +1289,33 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
             </div>
           </div>
 
-          {/* Supabase Migration Studio */}
+          {/* Supabase Schema & Database Operations Studio */}
           <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-xs space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
               <div>
                 <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 text-[10px] font-bold uppercase mb-1 border border-emerald-200">
                   <ArrowRightLeft className="w-3 h-3 text-emerald-600" />
-                  Future Migration Ready
+                  Supabase PostgreSQL Connected
                 </div>
                 <h3 className="text-base font-bold text-slate-900">
-                  Supabase PostgreSQL Migration Center
+                  Supabase Table Initialization & Schema Center
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Decoupled architecture: Switch seamlessly from Firebase to Supabase whenever you are ready
+                  Execute this SQL in your Supabase project to create all tables (students, classes, timetable, attendance) with Row Level Security enabled.
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <a
+                  href="https://supabase.com/dashboard/project/nwfugweckpnozbfoxtov/sql/new"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Open Supabase SQL Editor</span>
+                </a>
+
                 <button
                   type="button"
                   onClick={() => {
@@ -1148,7 +1340,8 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
                       students,
                       teachers,
                       classrooms,
-                      timetable
+                      timetable,
+                      sessions
                     };
                     const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
                     const url = URL.createObjectURL(blob);
@@ -1166,35 +1359,25 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
               </div>
             </div>
 
-            {/* Migration Steps */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {/* Quick 2-Step Guide */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
                 <div className="w-6 h-6 rounded-full bg-slate-900 text-white text-[11px] font-bold flex items-center justify-center mb-1.5">
                   1
                 </div>
-                <h4 className="text-xs font-bold text-slate-900">Create Supabase Project</h4>
+                <h4 className="text-xs font-bold text-slate-900">Run SQL in Supabase</h4>
                 <p className="text-[11px] text-slate-500 leading-relaxed">
-                  Create a new project at <a href="https://supabase.com" target="_blank" rel="noreferrer" className="text-emerald-600 font-bold hover:underline">supabase.com</a> and get your Project URL & Anon Key.
+                  Click <strong>Copy Supabase SQL</strong> (or open the <strong>Supabase SQL Editor</strong> link), paste the script into the query editor, and click <strong>Run</strong>.
                 </p>
               </div>
 
               <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-                <div className="w-6 h-6 rounded-full bg-slate-900 text-white text-[11px] font-bold flex items-center justify-center mb-1.5">
+                <div className="w-6 h-6 rounded-full bg-emerald-600 text-white text-[11px] font-bold flex items-center justify-center mb-1.5">
                   2
                 </div>
-                <h4 className="text-xs font-bold text-slate-900">Run SQL Schema</h4>
+                <h4 className="text-xs font-bold text-slate-900">Automatic Storage & Sync</h4>
                 <p className="text-[11px] text-slate-500 leading-relaxed">
-                  Click <strong>Copy Supabase SQL</strong> above and run it in the Supabase SQL Editor to provision all tables & indexes.
-                </p>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-                <div className="w-6 h-6 rounded-full bg-slate-900 text-white text-[11px] font-bold flex items-center justify-center mb-1.5">
-                  3
-                </div>
-                <h4 className="text-xs font-bold text-slate-900">Seamless Adapter Switch</h4>
-                <p className="text-[11px] text-slate-500 leading-relaxed">
-                  The application uses <code className="text-emerald-700 bg-emerald-50 px-1 py-0.5 rounded font-mono">CampusDatabaseAdapter</code>. When configured, queries route automatically with 0 UI modifications.
+                  Once tables exist, click <strong>Push All Data to Supabase Now</strong> above. All student records, attendance marks, timetables, and faculty will be safely stored in PostgreSQL!
                 </p>
               </div>
             </div>
@@ -1204,10 +1387,10 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
                   <Code className="w-4 h-4 text-slate-500" />
-                  Supabase PostgreSQL Table Schema (Ready to Execute)
+                  PostgreSQL Table DDL (Ready to Run in Supabase)
                 </span>
                 <span className="text-[11px] text-slate-400">
-                  Tables: settings, classes, students, teachers, classrooms, timetable, sessions
+                  Tables: campus_students, campus_classes, campus_sessions, campus_timetable, campus_state
                 </span>
               </div>
               <pre className="bg-slate-900 text-slate-200 p-4 rounded-xl text-[11px] font-mono overflow-x-auto max-h-56 overflow-y-auto border border-slate-800">

@@ -852,9 +852,9 @@ export default function App() {
     showToast('Campus system & database successfully reset to default D.Y.PATIL TECHNICAL CAMPUS state (ECE Div A).', 'success');
   };
 
-  // Force Push to Cloud Database
+  // Force Push to Cloud Database (Supabase / Firebase)
   const handleForceSyncCloud = async () => {
-    if (dbService.isQuotaExhausted) {
+    if (dbService.currentProvider === 'firebase' && dbService.isQuotaExhausted) {
       showToast('Firebase daily write limit reached. All campus data is safely stored locally in your browser.', 'info');
       return;
     }
@@ -869,14 +869,15 @@ export default function App() {
         timetable,
         sessions
       });
-      if (dbService.isQuotaExhausted) {
-        showToast('Firebase daily write quota reached. Local records safely preserved in browser.', 'info');
-      } else {
-        showToast('All campus data successfully synced to Firebase Firestore!', 'success');
-      }
-    } catch (e) {
+      const providerTitle = dbService.currentProvider === 'supabase' ? 'Supabase PostgreSQL' : 'Firebase Firestore';
+      showToast(`All ${students.length} students & campus records successfully stored in ${providerTitle}!`, 'success');
+    } catch (e: any) {
       console.error(e);
-      showToast('Failed to force sync to cloud. Local records preserved.', 'error');
+      if (e?.message?.includes('tables have not been created') || e?.message?.includes('schema cache')) {
+        showToast('Supabase connected! Please run the SQL schema in Supabase SQL editor to initialize tables.', 'info');
+      } else {
+        showToast('Failed to force sync to cloud. Local records preserved.', 'error');
+      }
     } finally {
       setCloudSyncing(false);
     }
@@ -1120,6 +1121,7 @@ export default function App() {
             onOpenImportModal={() => setIsImportModalOpen(true)}
             onForceSyncCloud={handleForceSyncCloud}
             isCloudSyncing={cloudSyncing}
+            sessions={sessions}
           />
         )}
 

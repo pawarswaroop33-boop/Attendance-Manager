@@ -11,8 +11,10 @@ import {
   SystemSettings 
 } from '../types';
 
+const STORAGE_KEY_PROVIDER = 'dypatil_active_database_provider';
+
 class CampusDatabaseService {
-  private activeProvider: DatabaseProviderType = 'firebase';
+  private activeProvider: DatabaseProviderType = 'supabase';
   private firebaseAdapter: FirebaseDatabaseAdapter;
   private supabaseAdapter: SupabaseDatabaseAdapter;
   private isInitialized: boolean = false;
@@ -20,6 +22,21 @@ class CampusDatabaseService {
   constructor() {
     this.firebaseAdapter = new FirebaseDatabaseAdapter();
     this.supabaseAdapter = new SupabaseDatabaseAdapter();
+
+    // Default to Supabase as requested by user, or restore preference
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const saved = localStorage.getItem(STORAGE_KEY_PROVIDER) as DatabaseProviderType;
+        if (saved === 'firebase' || saved === 'supabase') {
+          this.activeProvider = saved;
+        } else {
+          this.activeProvider = 'supabase';
+          localStorage.setItem(STORAGE_KEY_PROVIDER, 'supabase');
+        }
+      }
+    } catch (_) {
+      this.activeProvider = 'supabase';
+    }
   }
 
   get currentProvider(): DatabaseProviderType {
@@ -27,7 +44,15 @@ class CampusDatabaseService {
   }
 
   get adapter(): CampusDatabaseAdapter {
-    return this.activeProvider === 'firebase' ? this.firebaseAdapter : this.supabaseAdapter;
+    return this.activeProvider === 'supabase' ? this.supabaseAdapter : this.firebaseAdapter;
+  }
+
+  get supabase(): SupabaseDatabaseAdapter {
+    return this.supabaseAdapter;
+  }
+
+  get firebase(): FirebaseDatabaseAdapter {
+    return this.firebaseAdapter;
   }
 
   get isConnected(): boolean {
@@ -47,13 +72,19 @@ class CampusDatabaseService {
     }
   }
 
-  setProvider(provider: DatabaseProviderType) {
+  setProvider(provider: DatabaseProviderType): void {
     this.activeProvider = provider;
+    try {
+      localStorage.setItem(STORAGE_KEY_PROVIDER, provider);
+    } catch (_) {}
     this.adapter.init();
   }
 
+  setSupabaseCredentials(url: string, key: string): void {
+    this.supabaseAdapter.setCredentials(url, key);
+  }
+
   async init(): Promise<boolean> {
-    if (this.isInitialized) return true;
     try {
       const success = await this.adapter.init();
       this.isInitialized = true;

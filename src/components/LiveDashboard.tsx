@@ -155,50 +155,49 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
   return (
     <div className="space-y-4 sm:space-y-6">
       
-      {/* 4 Metric Cards - Compact & Space-Efficient */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-1.5 sm:gap-3">
+      {/* 4 Metric Cards - Clean & Responsive */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
         
-        {/* Total Enrolled */}
-        <div className="bg-white p-2 sm:p-3.5 rounded-xl border border-slate-200/90 shadow-2xs space-y-0.5">
+        {/* Total Students */}
+        <div className="bg-white p-3 sm:p-4 rounded-xl border border-slate-200 shadow-2xs space-y-1">
           <div className="flex items-center justify-between text-slate-500">
-            <span className="text-[10px] sm:text-xs font-bold text-slate-600 truncate">Total Enrolled</span>
-            <span className="w-5 h-5 sm:w-6 sm:h-6 rounded-md sm:rounded-lg bg-slate-100 flex items-center justify-center text-slate-700 shrink-0">
-              <UserCheck className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+            <span className="text-xs font-bold text-slate-600 truncate">Total Students</span>
+            <span className="w-6 h-6 rounded-lg bg-slate-100 flex items-center justify-center text-slate-700 shrink-0">
+              <UserCheck className="w-3.5 h-3.5" />
             </span>
           </div>
-          <div className="flex items-baseline gap-1 sm:gap-1.5">
-            <span className="text-base sm:text-2xl font-extrabold text-slate-900 tracking-tight">
+          <div className="flex items-baseline gap-1">
+            <span className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
               {stats.total}
             </span>
-            <span className="text-[9px] sm:text-xs font-semibold text-slate-500">Students</span>
+            <span className="text-xs font-medium text-slate-500">enrolled</span>
           </div>
-          <div className="text-[9px] sm:text-[11px] text-slate-500 pt-0.5 sm:pt-1 flex items-center justify-between border-t border-slate-100 truncate">
-            <span className="truncate">{currentClass.name}</span>
-            <span className="font-semibold text-slate-700 shrink-0 ml-1 hidden xs:inline sm:inline">{currentClass.room}</span>
+          <div className="text-[11px] text-slate-500 pt-1 border-t border-slate-100 truncate">
+            {currentClass.name}
           </div>
         </div>
 
-        {/* Present Students (Bold Emerald Green) */}
-        <div className="bg-white p-2 sm:p-3.5 rounded-xl border border-emerald-300 shadow-2xs space-y-0.5">
+        {/* Present Students */}
+        <div className="bg-white p-3 sm:p-4 rounded-xl border border-emerald-300 shadow-2xs space-y-1">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] sm:text-xs font-bold text-emerald-800 flex items-center gap-1 sm:gap-1.5 truncate">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse shrink-0"></span>
-              <span className="truncate">Present</span>
+            <span className="text-xs font-bold text-emerald-800 flex items-center gap-1.5 truncate">
+              <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse shrink-0"></span>
+              <span>Present</span>
             </span>
-            <span className="w-5 h-5 sm:w-6 sm:h-6 rounded-md sm:rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-800 shrink-0">
-              <Check className="w-3 h-3 sm:w-3.5 sm:h-3.5 stroke-[2.5]" />
+            <span className="w-6 h-6 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-800 shrink-0">
+              <Check className="w-3.5 h-3.5 stroke-[2.5]" />
             </span>
           </div>
-          <div className="flex items-baseline gap-1 sm:gap-1.5 flex-wrap">
-            <span className="text-base sm:text-2xl font-extrabold text-emerald-700 tracking-tight">
+          <div className="flex items-baseline gap-1.5 flex-wrap">
+            <span className="text-xl sm:text-2xl font-extrabold text-emerald-700 tracking-tight">
               {stats.present}
             </span>
-            <span className="text-[9px] sm:text-[10px] font-bold px-1 sm:px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 whitespace-nowrap">
+            <span className="text-[11px] font-bold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800">
               {stats.presentRate}%
             </span>
           </div>
-          <div className="pt-0.5 sm:pt-1 border-t border-emerald-100/80">
-            <div className="w-full bg-slate-100 h-1 sm:h-1.5 rounded-full overflow-hidden">
+          <div className="pt-1 border-t border-emerald-100">
+            <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
               <div 
                 className="bg-emerald-600 h-full rounded-full transition-all duration-300"
                 style={{ width: `${stats.presentRate}%` }}
@@ -207,24 +206,24 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
           </div>
         </div>
 
-        {/* Absent Students (Bold Crimson Red) */}
-        <div className="bg-white p-2 sm:p-3.5 rounded-xl border border-rose-300 shadow-2xs space-y-0.5">
+        {/* Absent Students */}
+        <div className="bg-white p-3 sm:p-4 rounded-xl border border-rose-300 shadow-2xs space-y-1">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] sm:text-xs font-bold text-rose-800 truncate">Absent</span>
-            <span className="w-5 h-5 sm:w-6 sm:h-6 rounded-md sm:rounded-lg bg-rose-100 flex items-center justify-center text-rose-800 shrink-0">
-              <X className="w-3 h-3 sm:w-3.5 sm:h-3.5 stroke-[2.5]" />
+            <span className="text-xs font-bold text-rose-800 truncate">Absent</span>
+            <span className="w-6 h-6 rounded-lg bg-rose-100 flex items-center justify-center text-rose-800 shrink-0">
+              <X className="w-3.5 h-3.5 stroke-[2.5]" />
             </span>
           </div>
-          <div className="flex items-baseline gap-1 sm:gap-1.5 flex-wrap">
-            <span className="text-base sm:text-2xl font-extrabold text-rose-700 tracking-tight">
+          <div className="flex items-baseline gap-1.5 flex-wrap">
+            <span className="text-xl sm:text-2xl font-extrabold text-rose-700 tracking-tight">
               {stats.absent}
             </span>
-            <span className="text-[9px] sm:text-[10px] font-bold px-1 sm:px-1.5 py-0.2 rounded bg-rose-100 text-rose-800 whitespace-nowrap">
+            <span className="text-[11px] font-bold px-1.5 py-0.2 rounded bg-rose-100 text-rose-800">
               {stats.absentRate}%
             </span>
           </div>
-          <div className="pt-0.5 sm:pt-1 border-t border-rose-100/80">
-            <div className="w-full bg-slate-100 h-1 sm:h-1.5 rounded-full overflow-hidden">
+          <div className="pt-1 border-t border-rose-100">
+            <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
               <div 
                 className="bg-rose-600 h-full rounded-full transition-all duration-300"
                 style={{ width: `${stats.absentRate}%` }}
@@ -233,24 +232,22 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
           </div>
         </div>
 
-        {/* Late Arrivals */}
-        <div className="bg-white p-2 sm:p-3.5 rounded-xl border border-slate-200/90 shadow-2xs space-y-0.5">
+        {/* Late / Excused */}
+        <div className="bg-white p-3 sm:p-4 rounded-xl border border-slate-200 shadow-2xs space-y-1">
           <div className="flex items-center justify-between text-slate-600">
-            <span className="text-[10px] sm:text-xs font-bold text-slate-700 truncate">Late</span>
-            <span className="w-5 h-5 sm:w-6 sm:h-6 rounded-md sm:rounded-lg bg-slate-100 flex items-center justify-center text-slate-700 shrink-0">
-              <Clock className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+            <span className="text-xs font-bold text-slate-700 truncate">Late / Excused</span>
+            <span className="w-6 h-6 rounded-lg bg-slate-100 flex items-center justify-center text-slate-700 shrink-0">
+              <Clock className="w-3.5 h-3.5" />
             </span>
           </div>
-          <div className="flex items-baseline gap-1 sm:gap-1.5">
-            <span className="text-base sm:text-2xl font-extrabold text-slate-800 tracking-tight">
+          <div className="flex items-baseline gap-1">
+            <span className="text-xl sm:text-2xl font-extrabold text-slate-800 tracking-tight">
               {stats.late + stats.excused}
             </span>
-            <span className="text-[9px] sm:text-xs font-semibold text-slate-500 truncate">
-              {stats.late} Late
-            </span>
+            <span className="text-xs font-semibold text-slate-500">recorded</span>
           </div>
-          <div className="pt-0.5 sm:pt-1 border-t border-slate-100 text-[9px] sm:text-[11px] text-slate-500 truncate">
-            Session log
+          <div className="pt-1 border-t border-slate-100 text-[11px] text-slate-500 truncate">
+            {stats.late} Late &bull; {stats.excused} Excused
           </div>
         </div>
 
@@ -373,16 +370,16 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
         </div>
 
         {/* Quick Batch Actions */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-2.5 border-t border-slate-100">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-slate-100">
           <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 w-full sm:w-auto">
-            <span className="text-[11px] sm:text-xs font-bold text-slate-500">Batch Operations:</span>
+            <span className="text-xs font-bold text-slate-500">Quick Actions:</span>
             
             <div className="grid grid-cols-3 sm:flex gap-1.5 sm:gap-2 w-full sm:w-auto">
               <button
                 id="action-mark-all-present"
                 type="button"
                 onClick={handleMarkAllPresentWithFeedback}
-                className="flex items-center justify-center gap-1 sm:gap-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-[11px] sm:text-xs font-bold px-2 py-2 sm:py-1.5 rounded-xl transition-colors cursor-pointer text-center"
+                className="flex items-center justify-center gap-1 sm:gap-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold px-2 py-2 rounded-xl transition-colors cursor-pointer min-h-[40px] text-center"
                 title="Mark all students as Present"
               >
                 <CheckSquare className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
@@ -393,7 +390,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                 id="action-mark-all-absent"
                 type="button"
                 onClick={() => onBatchUpdate('absent')}
-                className="flex items-center justify-center gap-1 sm:gap-1.5 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 text-[11px] sm:text-xs font-bold px-2 py-2 sm:py-1.5 rounded-xl transition-colors cursor-pointer text-center"
+                className="flex items-center justify-center gap-1 sm:gap-1.5 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 text-xs font-bold px-2 py-2 rounded-xl transition-colors cursor-pointer min-h-[40px] text-center"
                 title="Mark all students as Absent"
               >
                 <Square className="w-3.5 h-3.5 text-rose-600 shrink-0" />
@@ -404,11 +401,11 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                 id="action-clear-all-blank"
                 type="button"
                 onClick={() => onBatchUpdate('unmarked')}
-                className="flex items-center justify-center gap-1 sm:gap-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-[11px] sm:text-xs font-bold px-2 py-2 sm:py-1.5 rounded-xl transition-colors cursor-pointer text-center"
-                title="Clear all selections and make the roster completely blank"
+                className="flex items-center justify-center gap-1 sm:gap-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold px-2 py-2 rounded-xl transition-colors cursor-pointer min-h-[40px] text-center"
+                title="Clear all selections and reset roster"
               >
                 <X className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                <span className="truncate">Clear (Blank)</span>
+                <span className="truncate">Clear All</span>
               </button>
             </div>
           </div>
@@ -419,21 +416,21 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
         
         {/* Table/List Header */}
-        <div className="px-5 py-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2">
+        <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2">
           <div>
-            <h3 className="text-sm font-bold text-slate-900">Student Roll Call</h3>
-            <p className="text-xs text-slate-500">
-              Select Present, Absent, or Late for each student, or click the row to toggle
+            <h3 className="text-xs sm:text-sm font-bold text-slate-900">Student Roll Call</h3>
+            <p className="text-[11px] text-slate-500">
+              Tap row or tap Present / Absent / Late to record attendance
             </p>
           </div>
-          <span className="text-xs font-semibold text-slate-600 bg-white px-2.5 py-1 rounded-lg border border-slate-200">
-            Showing {filteredStudents.length} of {classStudents.length} students
+          <span className="text-xs font-semibold text-slate-600 bg-white px-2 py-1 rounded-lg border border-slate-200">
+            {filteredStudents.length} of {classStudents.length} students
           </span>
         </div>
 
         {/* Empty state */}
         {filteredStudents.length === 0 ? (
-          <div className="py-14 text-center">
+          <div className="py-12 text-center">
             <UserX className="w-10 h-10 text-slate-300 mx-auto mb-2" />
             <p className="text-sm font-bold text-slate-800">No students found matching your filter</p>
             <p className="text-xs text-slate-500 mt-1">Try resetting the search box or selecting &quot;All Students&quot;.</p>
@@ -453,18 +450,18 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                   key={student.id}
                   id={`student-row-${student.id}`}
                   onClick={() => handleTogglePresent(student.id)}
-                  className={`flex flex-col sm:flex-row sm:items-center justify-between p-3.5 sm:px-5 sm:py-4 gap-3 transition-colors cursor-pointer select-none ${
+                  className={`flex flex-col sm:flex-row sm:items-center justify-between p-3 sm:px-4 sm:py-3.5 gap-2.5 transition-colors cursor-pointer select-none ${
                     isPresent
-                      ? 'bg-emerald-50/25 hover:bg-emerald-50/45'
+                      ? 'bg-emerald-50/30 hover:bg-emerald-50/50'
                       : isAbsent
-                      ? 'bg-rose-50/25 hover:bg-rose-50/40'
+                      ? 'bg-rose-50/30 hover:bg-rose-50/50'
                       : isLate
                       ? 'bg-slate-100/60 hover:bg-slate-100/90'
                       : 'bg-white hover:bg-slate-50'
                   }`}
                 >
                   {/* Left: Roll No + Student Details */}
-                  <div className="flex items-center gap-3 min-w-0 w-full sm:w-auto">
+                  <div className="flex items-center gap-2.5 min-w-0 w-full sm:w-auto">
                     
                     {/* Roll Badge */}
                     <span className="font-mono text-xs font-bold px-2 py-1 rounded-lg bg-slate-100 text-slate-700 border border-slate-200 shrink-0">
@@ -479,25 +476,25 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                     {/* Student Name & Details */}
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className={`text-sm font-bold truncate ${isPresent ? 'text-slate-900' : 'text-slate-800'}`}>
+                        <span className={`text-xs sm:text-sm font-bold truncate ${isPresent ? 'text-slate-900' : 'text-slate-800'}`}>
                           {student.name}
                         </span>
-                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-500 shrink-0">
+                        <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-slate-100 text-slate-500 shrink-0">
                           {student.gender}
                         </span>
                         {isBlank && (
-                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200 shrink-0">
+                          <span className="text-[10px] font-medium px-1.5 py-0.2 rounded bg-slate-100 text-slate-500 border border-slate-200 shrink-0">
                             Blank
                           </span>
                         )}
                       </div>
                       
-                      <div className="flex items-center gap-2 text-xs text-slate-500 flex-wrap mt-0.5">
+                      <div className="flex items-center gap-2 text-[11px] text-slate-500 flex-wrap mt-0.5">
                         {student.parentName && (
                           <span className="truncate">Parent: {student.parentName}</span>
                         )}
                         {rec?.note && (
-                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-700 bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200">
                             <FileText className="w-3 h-3 text-slate-500" />
                             <span className="truncate max-w-[120px] sm:max-w-xs">{rec.note}</span>
                           </span>
@@ -506,17 +503,17 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                     </div>
                   </div>
 
-                  {/* Right: Full Words Attendance Buttons & Actions */}
-                  <div className="w-full sm:w-auto flex items-center justify-between sm:justify-end gap-1.5 sm:gap-2.5 pt-2 sm:pt-0 border-t border-slate-100 sm:border-0" onClick={(e) => e.stopPropagation()}>
+                  {/* Right: Attendance Toggle Buttons & Actions */}
+                  <div className="w-full sm:w-auto flex items-center justify-between sm:justify-end gap-1.5 pt-1.5 sm:pt-0 border-t border-slate-100 sm:border-0" onClick={(e) => e.stopPropagation()}>
                     
-                    {/* Status Full Words Switcher */}
-                    <div className="flex-1 sm:flex-initial flex items-center rounded-xl p-1 bg-slate-100 border border-slate-200 text-xs">
+                    {/* Status Switcher */}
+                    <div className="flex-1 sm:flex-initial flex items-center rounded-xl p-0.5 bg-slate-100 border border-slate-200 text-xs">
                       
-                      {/* Full Word: Present */}
+                      {/* Button: Present */}
                       <button
                         type="button"
                         onClick={(e) => handleSetStatus(student.id, 'present', e)}
-                        className={`flex-1 sm:flex-initial flex items-center justify-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                        className={`flex-1 sm:flex-initial flex items-center justify-center gap-1 px-2.5 sm:px-3 py-2 rounded-lg font-bold transition-all cursor-pointer min-h-[38px] ${
                           isPresent 
                             ? 'bg-emerald-600 text-white shadow-xs' 
                             : 'text-slate-600 hover:text-emerald-700 hover:bg-white/60'
@@ -527,11 +524,11 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                         <span>Present</span>
                       </button>
 
-                      {/* Full Word: Absent */}
+                      {/* Button: Absent */}
                       <button
                         type="button"
                         onClick={(e) => handleSetStatus(student.id, 'absent', e)}
-                        className={`flex-1 sm:flex-initial flex items-center justify-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                        className={`flex-1 sm:flex-initial flex items-center justify-center gap-1 px-2.5 sm:px-3 py-2 rounded-lg font-bold transition-all cursor-pointer min-h-[38px] ${
                           isAbsent 
                             ? 'bg-rose-600 text-white shadow-xs' 
                             : 'text-slate-600 hover:text-rose-700 hover:bg-white/60'
@@ -542,11 +539,11 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                         <span>Absent</span>
                       </button>
 
-                      {/* Full Word: Late */}
+                      {/* Button: Late */}
                       <button
                         type="button"
                         onClick={(e) => handleSetStatus(student.id, 'late', e)}
-                        className={`flex-1 sm:flex-initial flex items-center justify-center gap-1 px-2 sm:px-2.5 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                        className={`flex-1 sm:flex-initial flex items-center justify-center gap-1 px-2 sm:px-2.5 py-2 rounded-lg font-bold transition-all cursor-pointer min-h-[38px] ${
                           isLate 
                             ? 'bg-slate-800 text-white shadow-xs' 
                             : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
@@ -562,7 +559,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                     <button
                       type="button"
                       onClick={(e) => handleOpenNoteModal(student.id, rec?.note, e)}
-                      className={`p-2 rounded-xl border transition-colors cursor-pointer shrink-0 ${
+                      className={`p-2 rounded-xl border transition-colors cursor-pointer shrink-0 min-h-[38px] min-w-[38px] flex items-center justify-center ${
                         rec?.note 
                           ? 'bg-slate-100 border-slate-300 text-slate-800' 
                           : 'bg-white border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-50'
@@ -572,12 +569,12 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                       <Edit3 className="w-3.5 h-3.5" />
                     </button>
 
-                    {/* Direct WhatsApp Notice for Absent Students */}
+                    {/* WhatsApp Notice for Absent Students */}
                     {isAbsent && student.parentPhone && (
                       <button
                         type="button"
                         onClick={(e) => handleSendParentWhatsApp(student, 'absent', e)}
-                        className="flex items-center justify-center gap-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold px-2 sm:px-2.5 py-1.5 rounded-xl transition-colors cursor-pointer shrink-0"
+                        className="flex items-center justify-center gap-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold px-2.5 py-2 rounded-xl transition-colors cursor-pointer shrink-0 min-h-[38px]"
                         title={`Alert parent on WhatsApp: ${student.parentPhone}`}
                       >
                         <MessageSquare className="w-3.5 h-3.5 text-[#25D366] shrink-0" />

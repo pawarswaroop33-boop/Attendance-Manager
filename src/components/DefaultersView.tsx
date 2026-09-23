@@ -337,9 +337,9 @@ export const DefaultersView: React.FC<DefaultersViewProps> = ({
           </span>
         </div>
 
-        {/* Table View */}
+        {/* Table View (Desktop) and Card View (Mobile) */}
         {defaultersList.length === 0 ? (
-          <div className="p-12 text-center text-slate-500 space-y-2">
+          <div className="p-10 sm:p-12 text-center text-slate-500 space-y-2">
             <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 mx-auto flex items-center justify-center">
               <CheckCircle2 className="w-6 h-6" />
             </div>
@@ -349,118 +349,185 @@ export const DefaultersView: React.FC<DefaultersViewProps> = ({
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-rose-50/70 border-b border-rose-200 text-rose-950 font-bold uppercase tracking-wider">
-                <tr>
-                  <th className="py-3 px-4">Roll No</th>
-                  <th className="py-3 px-4">Student Name</th>
-                  <th className="py-3 px-4">Class / Division</th>
-                  <th className="py-3 px-4 text-center">Lectures</th>
-                  <th className="py-3 px-4 text-center">Attendance %</th>
-                  <th className="py-3 px-4">Parent Details & Mobile</th>
-                  <th className="py-3 px-4">Remarks</th>
-                  <th className="py-3 px-4 text-right">Parent Warning</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-rose-100">
-                {defaultersList.map((item) => {
-                  const hasSent = sentAlerts[item.student.id];
+          <>
+            {/* Mobile Card View (visible on mobile < 768px) */}
+            <div className="block md:hidden divide-y divide-rose-100">
+              {defaultersList.map((item) => {
+                const hasSent = sentAlerts[item.student.id];
 
-                  return (
-                    <tr 
-                      key={item.student.id} 
-                      className="bg-rose-50/30 hover:bg-rose-100/50 transition-colors"
-                    >
-                      {/* Roll No */}
-                      <td className="py-3 px-4 font-mono font-bold text-rose-900">
-                        {item.student.rollNo}
-                      </td>
-
-                      {/* Student Name */}
-                      <td className="py-3 px-4 font-bold text-slate-900">
-                        <div className="flex items-center gap-2">
-                          <span className="w-6 h-6 rounded-md bg-rose-200 text-rose-800 font-bold text-[10px] flex items-center justify-center">
-                            {item.student.name.charAt(0)}
-                          </span>
-                          <span>{item.student.name}</span>
+                return (
+                  <div key={item.student.id} className="p-3.5 bg-rose-50/20 space-y-2.5">
+                    {/* Header: Roll + Name + Attendance Rate */}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="font-mono font-bold text-xs px-2 py-0.5 rounded-md bg-rose-100 text-rose-900 border border-rose-200 shrink-0">
+                          #{item.student.rollNo}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-slate-900 truncate">
+                            {item.student.name}
+                          </p>
+                          <p className="text-[11px] text-slate-500 truncate">
+                            {item.primaryClass.name}
+                          </p>
                         </div>
-                      </td>
+                      </div>
 
-                      {/* Class */}
-                      <td className="py-3 px-4 text-slate-700 font-medium">
-                        {item.primaryClass.name}
-                      </td>
-
-                      {/* Total Lectures vs Attended */}
-                      <td className="py-3 px-4 text-center font-mono font-semibold text-slate-800">
-                        <span className="text-emerald-700 font-bold">{item.attendedLectures}</span>
-                        <span className="text-slate-400"> / </span>
-                        <span>{item.totalLectures}</span>
-                      </td>
-
-                      {/* Highlighted Percentage in Bold Red */}
-                      <td className="py-3 px-4 text-center">
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-rose-600 text-white font-mono font-extrabold text-xs shadow-xs">
+                      <div className="shrink-0 text-right">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-600 text-white font-mono font-extrabold text-xs shadow-xs">
                           {item.percentage}%
                         </span>
-                      </td>
+                      </div>
+                    </div>
 
-                      {/* Parent Contact Info - Clickable */}
-                      <td className="py-3 px-4">
-                        <div className="space-y-0.5">
-                          <p className="font-semibold text-slate-900">
-                            {item.student.parentName || 'Parent / Guardian'}
-                          </p>
+                    {/* Stats & Parent Info */}
+                    <div className="flex items-center justify-between text-xs text-slate-600 bg-white/70 p-2 rounded-xl border border-rose-100">
+                      <div>
+                        <span className="text-[10px] text-slate-400 block uppercase font-semibold">Attendance</span>
+                        <span className="font-mono font-bold text-rose-900">
+                          {item.attendedLectures} / {item.totalLectures} lectures
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[10px] text-slate-400 block uppercase font-semibold">Parent</span>
+                        <span className="font-medium text-slate-800 truncate block max-w-[150px]">
+                          {item.student.parentPhone || 'No phone saved'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Action Button: WhatsApp Alert */}
+                    <button
+                      type="button"
+                      onClick={() => createWhatsAppWarning(item)}
+                      className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer min-h-[40px] ${
+                        hasSent 
+                          ? 'bg-emerald-600 text-white' 
+                          : 'bg-rose-600 hover:bg-rose-700 text-white active:scale-98'
+                      }`}
+                    >
+                      <MessageSquare className="w-3.5 h-3.5 text-emerald-300" />
+                      <span>{hasSent ? 'Warning Sent (Send Again)' : 'Send Parent Warning on WhatsApp'}</span>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Desktop Table View (hidden on mobile < 768px) */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-rose-50/70 border-b border-rose-200 text-rose-950 font-bold uppercase tracking-wider">
+                  <tr>
+                    <th className="py-3 px-4">Roll No</th>
+                    <th className="py-3 px-4">Student Name</th>
+                    <th className="py-3 px-4">Class / Division</th>
+                    <th className="py-3 px-4 text-center">Lectures</th>
+                    <th className="py-3 px-4 text-center">Attendance %</th>
+                    <th className="py-3 px-4">Parent Details & Mobile</th>
+                    <th className="py-3 px-4">Remarks</th>
+                    <th className="py-3 px-4 text-right">Parent Warning</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-rose-100">
+                  {defaultersList.map((item) => {
+                    const hasSent = sentAlerts[item.student.id];
+
+                    return (
+                      <tr 
+                        key={item.student.id} 
+                        className="bg-rose-50/30 hover:bg-rose-100/50 transition-colors"
+                      >
+                        {/* Roll No */}
+                        <td className="py-3 px-4 font-mono font-bold text-rose-900">
+                          {item.student.rollNo}
+                        </td>
+
+                        {/* Student Name */}
+                        <td className="py-3 px-4 font-bold text-slate-900">
+                          <div className="flex items-center gap-2">
+                            <span className="w-6 h-6 rounded-md bg-rose-200 text-rose-800 font-bold text-[10px] flex items-center justify-center">
+                              {item.student.name.charAt(0)}
+                            </span>
+                            <span>{item.student.name}</span>
+                          </div>
+                        </td>
+
+                        {/* Class */}
+                        <td className="py-3 px-4 text-slate-700 font-medium">
+                          {item.primaryClass.name}
+                        </td>
+
+                        {/* Total Lectures vs Attended */}
+                        <td className="py-3 px-4 text-center font-mono font-semibold text-slate-800">
+                          <span className="text-emerald-700 font-bold">{item.attendedLectures}</span>
+                          <span className="text-slate-400"> / </span>
+                          <span>{item.totalLectures}</span>
+                        </td>
+
+                        {/* Highlighted Percentage */}
+                        <td className="py-3 px-4 text-center">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-600 text-white font-mono font-extrabold text-xs shadow-xs">
+                            {item.percentage}%
+                          </span>
+                        </td>
+
+                        {/* Parent Contact Info */}
+                        <td className="py-3 px-4">
+                          <div className="space-y-0.5">
+                            <p className="font-semibold text-slate-900">
+                              {item.student.parentName || 'Parent / Guardian'}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => createWhatsAppWarning(item)}
+                              className="inline-flex items-center gap-1 font-mono text-xs text-rose-700 hover:text-rose-900 underline font-bold cursor-pointer"
+                              title="Click to send warning message on WhatsApp"
+                            >
+                              <PhoneCall className="w-3 h-3 text-emerald-600" />
+                              <span>{item.student.parentPhone || 'No contact saved'}</span>
+                            </button>
+                          </div>
+                        </td>
+
+                        {/* Remarks */}
+                        <td className="py-3 px-4 text-slate-600 text-[11px] max-w-[180px]">
+                          <span className="bg-white border border-rose-200 px-2 py-0.5 rounded text-rose-900 font-medium">
+                            {item.remarks}
+                          </span>
+                        </td>
+
+                        {/* Warning Trigger Button */}
+                        <td className="py-3 px-4 text-right">
                           <button
                             type="button"
                             onClick={() => createWhatsAppWarning(item)}
-                            className="inline-flex items-center gap-1 font-mono text-xs text-rose-700 hover:text-rose-900 underline font-bold cursor-pointer"
-                            title="Click to send warning message on WhatsApp"
+                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer active:scale-95 min-h-[36px] ${
+                              hasSent 
+                                ? 'bg-emerald-600 hover:bg-emerald-700 text-white' 
+                                : 'bg-rose-600 hover:bg-rose-700 text-white'
+                            }`}
                           >
-                            <PhoneCall className="w-3 h-3 text-emerald-600" />
-                            <span>{item.student.parentPhone || 'No contact saved'}</span>
+                            {hasSent ? (
+                              <>
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>Sent Again</span>
+                              </>
+                            ) : (
+                              <>
+                                <MessageSquare className="w-3.5 h-3.5 text-emerald-300" />
+                                <span>Send Warning</span>
+                              </>
+                            )}
                           </button>
-                        </div>
-                      </td>
-
-                      {/* Remarks */}
-                      <td className="py-3 px-4 text-slate-600 text-[11px] max-w-[180px]">
-                        <span className="bg-white border border-rose-200 px-2 py-0.5 rounded text-rose-900 font-medium">
-                          {item.remarks}
-                        </span>
-                      </td>
-
-                      {/* Warning Trigger Button */}
-                      <td className="py-3 px-4 text-right">
-                        <button
-                          type="button"
-                          onClick={() => createWhatsAppWarning(item)}
-                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer active:scale-95 ${
-                            hasSent 
-                              ? 'bg-emerald-600 hover:bg-emerald-700 text-white' 
-                              : 'bg-rose-600 hover:bg-rose-700 text-white'
-                          }`}
-                        >
-                          {hasSent ? (
-                            <>
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              <span>Sent Again</span>
-                            </>
-                          ) : (
-                            <>
-                              <MessageSquare className="w-3.5 h-3.5 text-emerald-300" />
-                              <span>Send Warning</span>
-                            </>
-                          )}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
 
       </div>
