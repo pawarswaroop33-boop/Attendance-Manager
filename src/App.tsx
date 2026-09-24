@@ -223,6 +223,76 @@ export default function App() {
   const lastSyncedHashRef = useRef('');
   const userHasModifiedDataRef = useRef(false);
 
+  // History-Aware Navigation: Fixes browser back / swipe-back exiting the app
+  const handleTabChange = (newTab: AppTab) => {
+    if (newTab === currentTab) return;
+    try {
+      window.history.pushState({ screen: 'app', tab: newTab }, '');
+    } catch (_) {}
+    setCurrentTab(newTab);
+  };
+
+  const handleOpenWhatsAppModal = () => {
+    try {
+      window.history.pushState({ screen: 'modal', modal: 'whatsapp', tab: currentTab }, '');
+    } catch (_) {}
+    setIsWhatsAppModalOpen(true);
+  };
+
+  const handleOpenImportModal = () => {
+    try {
+      window.history.pushState({ screen: 'modal', modal: 'import', tab: currentTab }, '');
+    } catch (_) {}
+    setIsImportModalOpen(true);
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    setCurrentTab('dashboard');
+    try {
+      window.history.replaceState({ screen: 'login' }, '');
+    } catch (_) {}
+  };
+
+  // Popstate Listener: Intercepts mobile edge-swipe or browser back button
+  useEffect(() => {
+    // Establish initial baseline state
+    if (!window.history.state) {
+      try {
+        window.history.replaceState({ screen: currentUser ? 'app' : 'login', tab: currentTab }, '');
+      } catch (_) {}
+    }
+
+    const handlePopState = (event: PopStateEvent) => {
+      // 1. If any modal is open, close it and stay in the app
+      if (isWhatsAppModalOpen) {
+        setIsWhatsAppModalOpen(false);
+        return;
+      }
+      if (isImportModalOpen) {
+        setIsImportModalOpen(false);
+        return;
+      }
+
+      // 2. If user is in a sub-tab, go back to the primary Attendance Roster (dashboard)
+      if (currentTab !== 'dashboard') {
+        setCurrentTab('dashboard');
+        return;
+      }
+
+      // 3. If already on dashboard, prevent exiting the entire application accidentally
+      try {
+        window.history.pushState({ screen: 'app', tab: 'dashboard' }, '');
+      } catch (_) {}
+      showToast('Tap "Sign Out" in the header to leave the application.', 'info');
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [currentTab, isWhatsAppModalOpen, isImportModalOpen, currentUser]);
+
   // Initialize Firebase Database Persistence & Real-time Bi-directional Cloud Sync
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
@@ -878,7 +948,7 @@ export default function App() {
     setSelectedDate(date);
     setSelectedClassId(slot.classId);
     setActiveLectureSlotId(slot.id);
-    setCurrentTab('dashboard'); // Navigate directly to Attendance Roster so the teacher can tick students!
+    handleTabChange('dashboard'); // Navigate directly to Attendance Roster so the teacher can tick students!
   };
 
   // Calculate Defaulters Count for Header Badge (Req 15 & 16)
@@ -1142,6 +1212,9 @@ export default function App() {
         settings={settings}
         teachers={teachers}
         onLoginSuccess={(user) => {
+          try {
+            window.history.pushState({ screen: 'app', tab: 'dashboard' }, '');
+          } catch (_) {}
           setCurrentUser(user);
           // If teacher, set their first assigned class as active and initial slot
           if (user.role === 'teacher') {
@@ -1188,7 +1261,7 @@ export default function App() {
       {/* Top Header */}
       <Header
         currentTab={currentTab}
-        onTabChange={setCurrentTab}
+        onTabChange={handleTabChange}
         classes={visibleClasses.length > 0 ? visibleClasses : classes}
         selectedClassId={selectedClassId}
         onClassChange={(id) => {
@@ -1197,13 +1270,13 @@ export default function App() {
         }}
         selectedDate={selectedDate}
         onDateChange={setSelectedDate}
-        onOpenWhatsApp={() => setIsWhatsAppModalOpen(true)}
-        onOpenImportModal={() => setIsImportModalOpen(true)}
+        onOpenWhatsApp={handleOpenWhatsAppModal}
+        onOpenImportModal={handleOpenImportModal}
         savedIndicator={savedIndicator}
         totalPresent={totalPresentCount}
         totalStudents={currentClass.studentIds.length}
         currentUser={currentUser}
-        onLogout={() => setCurrentUser(null)}
+        onLogout={handleLogout}
         settings={settings}
         defaultersCount={defaultersCount}
         cloudSyncing={cloudSyncing}
@@ -1259,9 +1332,9 @@ export default function App() {
               onBatchUpdate={handleBatchUpdate}
               onInvertSelection={handleInvertSelection}
               onUpdateSessionRemarks={handleUpdateSessionRemarks}
-              onOpenWhatsApp={() => setIsWhatsAppModalOpen(true)}
+              onOpenWhatsApp={handleOpenWhatsAppModal}
               onSaveAttendancePermanently={handleSaveAttendancePermanently}
-              onNavigateToRegister={() => setCurrentTab('defaulters')}
+              onNavigateToRegister={() => handleTabChange('defaulters')}
               currentUser={currentUser}
               timetable={timetable}
               selectedDate={selectedDate}
@@ -1274,7 +1347,7 @@ export default function App() {
                 const slot = timetable.find(s => s.id === slotId);
                 if (slot?.classId) setSelectedClassId(slot.classId);
               }}
-              onNavigateToTimetable={() => setCurrentTab('timetable')}
+              onNavigateToTimetable={() => handleTabChange('timetable')}
               onSelectDate={setSelectedDate}
             />
           </div>
@@ -1310,9 +1383,9 @@ export default function App() {
               setSelectedClassId(classId);
               setSelectedDate(date);
               setActiveLectureSlotId(slotId);
-              setCurrentTab('dashboard');
+              handleTabChange('dashboard');
             }}
-            onOpenWhatsAppModal={() => setIsWhatsAppModalOpen(true)}
+            onOpenWhatsAppModal={handleOpenWhatsAppModal}
           />
         )}
 
@@ -1322,7 +1395,7 @@ export default function App() {
             sessions={sessions}
             currentClass={currentClass}
             students={students}
-            onOpenWhatsApp={() => setIsWhatsAppModalOpen(true)}
+            onOpenWhatsApp={handleOpenWhatsAppModal}
             currentUser={currentUser}
             timetable={timetable}
           />
@@ -1338,7 +1411,7 @@ export default function App() {
             onRemoveStudentFromClass={handleRemoveStudentFromClass}
             onDeleteStudentPermanently={handleDeleteStudentPermanently}
             onDeleteAllStudents={handleDeleteAllStudents}
-            onOpenImportModal={() => setIsImportModalOpen(true)}
+            onOpenImportModal={handleOpenImportModal}
           />
         )}
 
