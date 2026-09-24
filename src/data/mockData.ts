@@ -317,96 +317,102 @@ export function generateInitialSessions(classes: ClassGroup[], students: Student
   const sessions: AttendanceSession[] = [];
   const today = new Date();
 
-  // Generate 14 previous calendar dates
+  // Generate calendar dates for past 12 days (excluding today and future, so today is fresh for attendance)
   const dates: string[] = [];
-  for (let i = 13; i >= 0; i--) {
+  for (let i = 12; i >= 1; i--) {
     const d = new Date(today);
     d.setDate(today.getDate() - i);
-    // Skip Sundays
-    if (d.getDay() !== 0) {
-      const yyyy = d.getFullYear();
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      const dd = String(d.getDate()).padStart(2, '0');
-      dates.push(`${yyyy}-${mm}-${dd}`);
-    }
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    dates.push(`${yyyy}-${mm}-${dd}`);
   }
+
+  const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
   classes.forEach(cls => {
     const classStudents = students.filter(st => cls.studentIds.includes(st.id));
 
     dates.forEach((date, dateIdx) => {
-      const isToday = dateIdx === dates.length - 1;
-      const records: Record<string, { studentId: string; status: 'present' | 'absent' | 'late' | 'excused'; timestamp: string; note?: string }> = {};
+      const [y, m, d] = date.split('-').map(Number);
+      const dateObj = new Date(y, m - 1, d);
+      const dayOfWeek = daysOfWeek[dateObj.getDay()] || 'Monday';
 
-      classStudents.forEach(st => {
-        let status: 'present' | 'absent' | 'late' | 'excused' = 'present';
-        let note: string | undefined = undefined;
+      // Find slots scheduled for this day of week - skip days with no scheduled lectures (e.g. Sunday)
+      const scheduledSlots = INITIAL_TIMETABLE.filter(s => s.dayOfWeek === dayOfWeek && s.classId === cls.id);
+      if (scheduledSlots.length === 0) {
+        return;
+      }
+      const slotsToGenerate = scheduledSlots;
 
-        if (st.id === 'std-5') {
-          // Kabir Verma has lower attendance (~40% - definite defaulter under 50% criteria)
-          const hash = (dateIdx * 7 + 3) % 10;
-          if (hash < 6) {
-            status = 'absent';
-            note = 'Uninformed absent';
+      slotsToGenerate.forEach((slot, slotIdx) => {
+        const records: Record<string, { studentId: string; status: 'present' | 'absent' | 'late' | 'excused'; timestamp: string; note?: string }> = {};
+
+        classStudents.forEach(st => {
+          let status: 'present' | 'absent' | 'late' | 'excused' = 'present';
+          let note: string | undefined = undefined;
+
+          // Compute deterministic attendance per student and slot
+          const seed = dateIdx * 17 + slotIdx * 31 + parseInt(st.rollNo, 10);
+
+          if (st.id === 'std-5') {
+            // Kabir Verma - attendance below 50%
+            const hash = seed % 10;
+            if (hash < 6) {
+              status = 'absent';
+              note = 'Uninformed absent';
+            }
+          } else if (st.id === 'std-13') {
+            // Samar Malhotra - attendance below 50%
+            const hash = seed % 10;
+            if (hash < 5) {
+              status = 'absent';
+              note = 'Parent notified';
+            }
+          } else if (st.id === 'std-7') {
+            // Mohit Rao - arrives late or absent (~60% attendance)
+            const hash = seed % 10;
+            if (hash === 2) {
+              status = 'late';
+              note = 'Bus delayed';
+            } else if (hash === 6 || hash === 7) {
+              status = 'absent';
+            }
+          } else {
+            // Regular students (~94% presence)
+            const hash = seed % 25;
+            if (hash === 0) {
+              status = 'absent';
+              note = 'Medical leave';
+            } else if (hash === 1) {
+              status = 'late';
+              note = 'Arrived 10m late';
+            }
           }
-        } else if (st.id === 'std-13') {
-          // Samar Malhotra has attendance ~46% - definite defaulter under 50% criteria
-          const hash = (dateIdx * 5 + 2) % 10;
-          if (hash < 5) {
-            status = 'absent';
-            note = 'Parent notified';
-          }
-        } else if (st.id === 'std-7') {
-          // Mohit Rao arrives late or absent (~60% attendance)
-          const hash = (dateIdx * 3) % 10;
-          if (hash === 2) {
-            status = 'late';
-            note = 'Bus delayed';
-          } else if (hash === 6 || hash === 7) {
-            status = 'absent';
-          }
-        } else {
-          // Regular student (~92-96% presence)
-          const hash = (dateIdx * 13 + parseInt(st.rollNo, 10)) % 25;
-          if (hash === 0) {
-            status = 'absent';
-            note = 'Medical leave';
-          } else if (hash === 1) {
-            status = 'late';
-            note = 'Arrived 15m late';
-          }
-        }
 
-        // If today, initialize all students cleanly as present
-        if (isToday) {
-          status = 'present';
-          note = undefined;
-        }
+          records[st.id] = {
+            studentId: st.id,
+            status,
+            timestamp: new Date().toISOString(),
+            ...(note ? { note } : {})
+          };
+        });
 
-        const recordItem: { studentId: string; status: 'present' | 'absent' | 'late' | 'excused'; timestamp: string; note?: string } = {
-          studentId: st.id,
-          status,
-          timestamp: new Date().toISOString()
-        };
-        if (note) {
-          recordItem.note = note;
-        }
-
-        records[st.id] = recordItem;
-      });
-
-      sessions.push({
-        id: `${cls.id}_${date}_slot-mon-1`,
-        classId: cls.id,
-        date,
-        sessionName: '08:00 AM - 09:00 AM - Microcontrollers & Embedded Systems',
-        teacherName: cls.teacherName,
-        lectureSlotId: 'slot-mon-1',
-        timeSlot: '08:00 AM - 09:00 AM',
-        subject: cls.subject,
-        records,
-        lastUpdated: new Date().toISOString(),
-        remarks: isToday ? 'Lecture conducted on ARM Cortex Microcontroller architecture.' : 'Lecture completed successfully.'
+        sessions.push({
+          id: `${cls.id}_${date}_${slot.id}`,
+          classId: cls.id,
+          date,
+          dayOfWeek,
+          sessionName: `${slot.timeSlotLabel} - ${slot.subject}`,
+          teacherName: slot.teacherName,
+          teacherId: slot.teacherId,
+          lectureSlotId: slot.id,
+          timeSlot: slot.timeSlotLabel,
+          subject: slot.subject,
+          records,
+          lastUpdated: new Date().toISOString(),
+          remarks: `Conducted lecture on ${slot.subject} for ${cls.name}.`
+        });
       });
     });
   });

@@ -833,8 +833,16 @@ CREATE POLICY "Public campus_timetable access" ON campus_timetable FOR ALL USING
 DROP POLICY IF EXISTS "Public campus_sessions access" ON campus_sessions;
 CREATE POLICY "Public campus_sessions access" ON campus_sessions FOR ALL USING (true) WITH CHECK (true);
 
--- 12. Enable Real-Time Replication on campus_state
+-- 12. Enable Real-Time Replication for Live Sync
+ALTER TABLE campus_state REPLICA IDENTITY FULL;
+ALTER TABLE campus_sessions REPLICA IDENTITY FULL;
+ALTER TABLE campus_students REPLICA IDENTITY FULL;
+ALTER TABLE campus_timetable REPLICA IDENTITY FULL;
+
 ALTER PUBLICATION supabase_realtime ADD TABLE campus_state;
+ALTER PUBLICATION supabase_realtime ADD TABLE campus_sessions;
+ALTER PUBLICATION supabase_realtime ADD TABLE campus_students;
+ALTER PUBLICATION supabase_realtime ADD TABLE campus_timetable;
 `;
   }
 }

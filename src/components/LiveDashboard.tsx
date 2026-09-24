@@ -13,11 +13,26 @@ import {
   FileText, 
   UserCheck, 
   UserX, 
-  Sparkles
+  Sparkles, 
+  Save, 
+  CalendarCheck, 
+  CheckCircle2, 
+  ArrowRight,
+  CalendarOff,
+  AlertCircle,
+  AlertTriangle,
+  BookOpen,
+  Layers,
+  MapPin,
+  Calendar as CalendarIcon,
+  User,
+  GraduationCap
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { AttendanceSession, ClassGroup, Student, AttendanceStatus } from '../types';
+import { AttendanceSession, ClassGroup, Student, AttendanceStatus, AuthUser, TimetableSlot } from '../types';
 import { generateParentAlertMessage, shareToWhatsApp } from '../utils/whatsapp';
+import { formatDateWithDay, formatDateShort, getDayOfWeek } from '../utils/dateUtils';
+import { getNextLectureDateForUser } from '../utils/teacherFilter';
 
 interface LiveDashboardProps {
   session: AttendanceSession;
@@ -28,6 +43,18 @@ interface LiveDashboardProps {
   onInvertSelection?: () => void;
   onUpdateSessionRemarks: (remarks: string) => void;
   onOpenWhatsApp: () => void;
+  onSaveAttendancePermanently?: () => void;
+  onNavigateToRegister?: () => void;
+  currentUser?: AuthUser;
+  timetable?: TimetableSlot[];
+  selectedDate: string;
+  hasLectureOnDate?: boolean;
+  dayLectures?: TimetableSlot[];
+  activeLectureSlotId?: string;
+  activeSlot?: TimetableSlot;
+  onSelectLectureSlot?: (slotId: string) => void;
+  onNavigateToTimetable?: () => void;
+  onSelectDate?: (date: string) => void;
 }
 
 export const LiveDashboard: React.FC<LiveDashboardProps> = ({
@@ -38,12 +65,42 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
   onBatchUpdate,
   onInvertSelection,
   onUpdateSessionRemarks,
-  onOpenWhatsApp
+  onOpenWhatsApp,
+  onSaveAttendancePermanently,
+  onNavigateToRegister,
+  currentUser,
+  timetable = [],
+  selectedDate,
+  hasLectureOnDate = true,
+  dayLectures = [],
+  activeLectureSlotId,
+  activeSlot,
+  onSelectLectureSlot,
+  onNavigateToTimetable,
+  onSelectDate
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'present' | 'absent' | 'late' | 'unmarked'>('all');
   const [activeNoteStudentId, setActiveNoteStudentId] = useState<string | null>(null);
   const [noteText, setNoteText] = useState('');
+
+  const dayOfWeek = getDayOfWeek(selectedDate);
+  const nextLectureDate = useMemo(() => {
+    return getNextLectureDateForUser(selectedDate, currentUser, timetable, currentClass?.id);
+  }, [selectedDate, currentUser, timetable, currentClass?.id]);
+
+  // Resolve the active lecture with proper timing and details
+  const currentLecture = useMemo(() => {
+    if (activeSlot) return activeSlot;
+    if (activeLectureSlotId && timetable.length > 0) {
+      const found = timetable.find(s => s.id === activeLectureSlotId);
+      if (found) return found;
+    }
+    if (dayLectures.length > 0) {
+      return dayLectures[0];
+    }
+    return undefined;
+  }, [activeSlot, activeLectureSlotId, timetable, dayLectures]);
 
   // Class students
   const classStudents = useMemo(() => {
@@ -98,10 +155,18 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
     });
   }, [classStudents, session.records, statusFilter, searchQuery]);
 
+  // Tapping student row toggles attendance (unmarked -> present -> absent -> present)
   const handleTogglePresent = (studentId: string) => {
     const currentRec = session.records[studentId];
     const currentStatus = currentRec?.status || 'unmarked';
-    const nextStatus: AttendanceStatus = currentStatus === 'present' ? 'unmarked' : 'present';
+    let nextStatus: AttendanceStatus = 'present';
+    if (currentStatus === 'present') {
+      nextStatus = 'absent';
+    } else if (currentStatus === 'absent') {
+      nextStatus = 'present';
+    } else {
+      nextStatus = 'present';
+    }
     onUpdateRecord(studentId, nextStatus, currentRec?.note);
 
     if (nextStatus === 'present' && stats.present + 1 === stats.total && stats.total > 0) {
@@ -116,8 +181,9 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
   const handleSetStatus = (studentId: string, status: AttendanceStatus, e?: React.MouseEvent) => {
     e?.stopPropagation();
     const currentRec = session.records[studentId];
+    const currentStatus = currentRec?.status || 'unmarked';
     // If clicking the active status, toggle back to unmarked (blank)
-    const nextStatus: AttendanceStatus = currentRec?.status === status ? 'unmarked' : status;
+    const nextStatus: AttendanceStatus = currentStatus === status ? 'unmarked' : status;
     onUpdateRecord(studentId, nextStatus, currentRec?.note);
   };
 
@@ -130,7 +196,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
   const handleSaveNote = () => {
     if (activeNoteStudentId) {
       const currentRec = session.records[activeNoteStudentId];
-      const status = currentRec?.status || 'absent';
+      const status = currentRec?.status || 'unmarked';
       onUpdateRecord(activeNoteStudentId, status, noteText.trim() ? noteText.trim() : undefined);
       setActiveNoteStudentId(null);
       setNoteText('');
@@ -152,8 +218,280 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
     });
   };
 
+  const handleClearAll = () => {
+    setStatusFilter('all');
+    onBatchUpdate('unmarked');
+  };
+
+  // =========================================================================
+  // CASE 1: NO LECTURE ON THIS DATE (Requirement: "if i click on date and if
+  // there is lecture on that day then only teacher should be able to take
+  // attendance otherwise there is no lecture tody")
+  // =========================================================================
+  if (!hasLectureOnDate) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-white rounded-3xl border-2 border-amber-200/90 p-8 sm:p-12 text-center space-y-6 shadow-sm max-w-2xl mx-auto my-6">
+          <div className="w-18 h-18 rounded-3xl bg-amber-50 border border-amber-200 text-amber-700 flex items-center justify-center mx-auto shadow-inner">
+            <CalendarOff className="w-9 h-9" />
+          </div>
+
+          <div className="space-y-2">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 text-amber-900 border border-amber-200 text-xs font-black uppercase tracking-wider">
+              <AlertCircle className="w-3.5 h-3.5 text-amber-700" />
+              <span>No Lecture Today</span>
+            </div>
+
+            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+              There is no lecture today
+            </h2>
+
+            <p className="text-sm font-semibold text-slate-700">
+              {formatDateWithDay(selectedDate, dayOfWeek)}
+            </p>
+
+            <p className="text-xs sm:text-sm text-slate-600 max-w-lg mx-auto leading-relaxed pt-1">
+              {currentUser?.role === 'teacher'
+                ? `According to the academic timetable, you (${currentUser.name}) do not have any scheduled lectures on ${dayOfWeek}. Faculty can only take attendance on days when their lectures are scheduled.`
+                : `No academic lectures are scheduled for ${currentClass.name} on ${dayOfWeek}. Attendance cannot be marked on non-lecture days.`}
+            </p>
+          </div>
+
+          {/* Quick Jump Action Buttons */}
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+            {onNavigateToTimetable && (
+              <button
+                type="button"
+                onClick={onNavigateToTimetable}
+                className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-all shadow-xs flex items-center gap-2 cursor-pointer active:scale-95"
+              >
+                <Clock className="w-4 h-4 text-sky-400" />
+                <span>View Full Weekly Timetable</span>
+              </button>
+            )}
+
+            {nextLectureDate && onSelectDate && (
+              <button
+                type="button"
+                onClick={() => onSelectDate(nextLectureDate.dateStr)}
+                className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-xs flex items-center gap-2 cursor-pointer active:scale-95"
+              >
+                <Sparkles className="w-4 h-4 text-emerald-200" />
+                <span>Go to Next Lecture: {formatDateShort(nextLectureDate.dateStr)} ({nextLectureDate.dayOfWeek})</span>
+              </button>
+            )}
+
+            {onSelectDate && (
+              <button
+                type="button"
+                onClick={() => {
+                  const today = new Date();
+                  const yyyy = today.getFullYear();
+                  const mm = String(today.getMonth() + 1).padStart(2, '0');
+                  const dd = String(today.getDate()).padStart(2, '0');
+                  onSelectDate(`${yyyy}-${mm}-${dd}`);
+                }}
+                className="px-3.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all cursor-pointer"
+              >
+                Jump to Today
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // =========================================================================
+  // CASE 2: LECTURE SCHEDULED ON THIS DATE - TAKE ATTENDANCE
+  // ALL STUDENTS ARE BY DEFAULT PRESENT
+  // =========================================================================
   return (
     <div className="space-y-4 sm:space-y-6">
+      
+      {/* ========================================================================= */}
+      {/* PROMINENT LECTURE TIMING & DETAILS HERO CARD */}
+      {/* Ensures proper lecture and proper timing are clearly visible */}
+      {/* ========================================================================= */}
+      {currentLecture && (
+        <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 rounded-2xl p-4 sm:p-5 text-white shadow-md border border-slate-700/80 card-3d">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            
+            {/* Left: Timing Pill, Subject, Faculty & Location */}
+            <div className="space-y-2 min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                
+                {/* PROPER TIMING BADGE */}
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-500/20 text-sky-300 border border-sky-400/30 text-xs sm:text-sm font-mono font-extrabold shadow-inner">
+                  <Clock className="w-4 h-4 text-sky-400 shrink-0" />
+                  <span>{currentLecture.timeSlotLabel}</span>
+                </span>
+
+                {/* Date & Day Badge */}
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-800 text-slate-300 border border-slate-700 text-xs font-semibold">
+                  <CalendarIcon className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span>{formatDateWithDay(selectedDate, dayOfWeek)}</span>
+                </span>
+
+                {/* Live Attendance Mode Indicator */}
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[11px] font-extrabold uppercase tracking-wider">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span>Active Lecture</span>
+                </span>
+              </div>
+
+              {/* Lecture Subject Name */}
+              <div className="pt-0.5">
+                <h2 className="text-lg sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">
+                  <BookOpen className="w-5 h-5 sm:w-6 sm:h-6 text-sky-400 shrink-0" />
+                  <span>{currentLecture.subject}</span>
+                </h2>
+              </div>
+
+              {/* Faculty, Room, and Class Group */}
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-300 font-medium pt-0.5">
+                <div className="flex items-center gap-1.5">
+                  <User className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span>Faculty: <strong className="text-white">{currentLecture.teacherName}</strong></span>
+                </div>
+                
+                <span className="text-slate-600 hidden sm:inline">&bull;</span>
+                
+                <div className="flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>Room: <strong className="text-white">{currentLecture.roomName}</strong></span>
+                </div>
+
+                <span className="text-slate-600 hidden sm:inline">&bull;</span>
+
+                <div className="flex items-center gap-1.5">
+                  <GraduationCap className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                  <span>Class: <strong className="text-white">{currentLecture.className || currentClass.name}</strong></span>
+                </div>
+              </div>
+            </div>
+
+            {/* Right: Quick Live Attendance Status / Multiple Slots Notice */}
+            <div className="flex flex-col sm:flex-row lg:flex-col items-start lg:items-end justify-between gap-2 shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-700/80">
+              <div className="bg-slate-800/90 border border-slate-700 rounded-xl px-3.5 py-2 text-right">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Class Roster</span>
+                <span className="text-base font-extrabold text-emerald-400 font-mono">
+                  {stats.present} / {stats.total} Present
+                </span>
+              </div>
+              <span className="text-[11px] text-slate-400 font-medium">
+                Timing: {currentLecture.startTime} to {currentLecture.endTime}
+              </span>
+            </div>
+
+          </div>
+
+          {/* Multiple Lecture Slots Switcher (if teacher has >1 lecture today) */}
+          {dayLectures.length > 1 && onSelectLectureSlot && (
+            <div className="mt-4 pt-3.5 border-t border-slate-700/80">
+              <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+                <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                  <Layers className="w-3.5 h-3.5 text-sky-400" />
+                  <span>Scheduled lectures for you on this day ({dayLectures.length}):</span>
+                </span>
+                <span className="text-[11px] text-slate-400">
+                  Click a slot to switch timing
+                </span>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {dayLectures.map(slot => {
+                  const isSelected = (currentLecture?.id === slot.id);
+                  return (
+                    <button
+                      key={slot.id}
+                      type="button"
+                      onClick={() => onSelectLectureSlot(slot.id)}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                        isSelected
+                          ? 'bg-sky-500 text-white shadow-xs ring-2 ring-sky-300'
+                          : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                      }`}
+                    >
+                      <Clock className="w-3.5 h-3.5 text-sky-300" />
+                      <span className="font-mono">{slot.timeSlotLabel}</span>
+                      <span className="opacity-50">&bull;</span>
+                      <span className="truncate max-w-[160px]">{slot.subject}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Dynamic Roll Call Guide Banner */}
+      {stats.unmarked > 0 ? (
+        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 sm:px-4 sm:py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="w-7 h-7 rounded-xl bg-slate-800 text-white flex items-center justify-center shrink-0 shadow-xs">
+              <UserCheck className="w-4 h-4" />
+            </span>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs sm:text-sm font-extrabold text-slate-900">
+                  Attendance Roll Call
+                </span>
+                <span className="text-[10px] font-extrabold px-2 py-0.2 rounded-full bg-amber-100 text-amber-900 border border-amber-200">
+                  {stats.unmarked} of {stats.total} Unmarked
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-600 leading-tight">
+                Tap student row to mark Present, or click Absent/Late. Use &quot;All Present&quot; for instant batch mark or &quot;Clear All&quot; to reset.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+            <button
+              type="button"
+              onClick={handleMarkAllPresentWithFeedback}
+              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold transition-all cursor-pointer shadow-xs flex items-center gap-1.5"
+            >
+              <CheckSquare className="w-3.5 h-3.5" />
+              <span>Mark All Present</span>
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-emerald-50/90 border border-emerald-200/90 rounded-2xl p-3 sm:px-4 sm:py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="w-7 h-7 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+              <Check className="w-4 h-4 stroke-[3]" />
+            </span>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs sm:text-sm font-extrabold text-emerald-950">
+                  Attendance Complete
+                </span>
+                <span className="text-[10px] font-extrabold px-2 py-0.2 rounded-full bg-emerald-200 text-emerald-900">
+                  {stats.present} Present &bull; {stats.absent} Absent
+                </span>
+              </div>
+              <p className="text-[11px] text-emerald-800 leading-tight">
+                All {stats.total} students recorded. Remember to save attendance permanently to lock in records.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+            <button
+              type="button"
+              onClick={handleClearAll}
+              className="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-xs font-bold transition-all cursor-pointer shadow-2xs flex items-center gap-1"
+            >
+              <X className="w-3 h-3 text-slate-500" />
+              <span>Clear All</span>
+            </button>
+          </div>
+        </div>
+      )}
       
       {/* 4 Metric Cards - Clean & Responsive */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
@@ -369,7 +707,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
           </div>
         </div>
 
-        {/* Quick Batch Actions */}
+        {/* Quick Batch Actions & Permanent Save Action */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-slate-100">
           <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 w-full sm:w-auto">
             <span className="text-xs font-bold text-slate-500">Quick Actions:</span>
@@ -397,10 +735,23 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                 <span className="truncate">All Absent</span>
               </button>
 
+              {onInvertSelection && (
+                <button
+                  id="action-invert-selection"
+                  type="button"
+                  onClick={onInvertSelection}
+                  className="flex items-center justify-center gap-1 sm:gap-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold px-2 py-2 rounded-xl transition-colors cursor-pointer min-h-[40px] text-center"
+                  title="Invert current selections"
+                >
+                  <ArrowRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                  <span className="truncate">Invert</span>
+                </button>
+              )}
+
               <button
                 id="action-clear-all-blank"
                 type="button"
-                onClick={() => onBatchUpdate('unmarked')}
+                onClick={handleClearAll}
                 className="flex items-center justify-center gap-1 sm:gap-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold px-2 py-2 rounded-xl transition-colors cursor-pointer min-h-[40px] text-center"
                 title="Clear all selections and reset roster"
               >
@@ -409,6 +760,35 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
               </button>
             </div>
           </div>
+
+          {/* Save Permanently Button in Action Bar */}
+          {onSaveAttendancePermanently && (
+            <div className="flex flex-wrap items-center gap-2 pt-2 sm:pt-0">
+              <button
+                id="btn-save-attendance-permanently"
+                type="button"
+                onClick={onSaveAttendancePermanently}
+                className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition-all shadow-xs cursor-pointer"
+                title="Save attendance permanently with Date, Day, Present and Absent list"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>Save Attendance Permanently</span>
+              </button>
+
+              {onNavigateToRegister && (
+                <button
+                  type="button"
+                  onClick={onNavigateToRegister}
+                  className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold px-3 py-2 rounded-xl transition-all cursor-pointer"
+                  title="View taken records and defaulters list"
+                >
+                  <CalendarCheck className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Attendance Log</span>
+                  <ArrowRight className="w-3 h-3 text-slate-400" />
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -597,15 +977,28 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
             <span className="text-rose-700 font-bold">{stats.absent} Absent</span>
             {stats.late > 0 && <span className="text-amber-700 font-bold">, {stats.late} Late</span>}
           </div>
-          <button
-            id="share-whatsapp-button-roster"
-            type="button"
-            onClick={onOpenWhatsApp}
-            className="w-full sm:w-auto flex items-center justify-center gap-2 bg-[#25D366] hover:bg-[#1faa4f] active:scale-95 text-white font-bold text-xs sm:text-sm px-5 py-2.5 rounded-xl shadow-xs transition-all cursor-pointer shrink-0"
-          >
-            <Share2 className="w-4 h-4" />
-            <span>Share Attendance on WhatsApp</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+            {onSaveAttendancePermanently && (
+              <button
+                id="btn-save-attendance-permanently-footer"
+                type="button"
+                onClick={onSaveAttendancePermanently}
+                className="w-full sm:w-auto flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs sm:text-sm px-5 py-2.5 rounded-xl shadow-xs transition-all cursor-pointer shrink-0"
+              >
+                <Save className="w-4 h-4" />
+                <span>Save Attendance Permanently</span>
+              </button>
+            )}
+            <button
+              id="share-whatsapp-button-roster"
+              type="button"
+              onClick={onOpenWhatsApp}
+              className="w-full sm:w-auto flex items-center justify-center gap-2 bg-[#25D366] hover:bg-[#1faa4f] active:scale-95 text-white font-bold text-xs sm:text-sm px-5 py-2.5 rounded-xl shadow-xs transition-all cursor-pointer shrink-0"
+            >
+              <Share2 className="w-4 h-4" />
+              <span>Share on WhatsApp</span>
+            </button>
+          </div>
         </div>
       </div>
 

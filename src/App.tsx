@@ -31,6 +31,14 @@ import { TimetableLectureSelector } from './components/TimetableLectureSelector'
 import { HodControlCenter } from './components/HodControlCenter';
 import { ImportStudentsModal } from './components/ImportStudentsModal';
 import { WhatsAppShareModal } from './components/WhatsAppShareModal';
+import { getDayOfWeek } from './utils/dateUtils';
+import { 
+  isSlotBelongsToTeacher, 
+  isSessionBelongsToTeacher, 
+  filterSessionsForUser,
+  getLecturesForDateAndUser,
+  hasLectureOnDateForUser
+} from './utils/teacherFilter';
 
 const STORAGE_KEY_AUTH = 'dypatil_auth_user_v1';
 const STORAGE_KEY_SETTINGS = 'dypatil_settings_v1';
@@ -151,6 +159,12 @@ export default function App() {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.some(s => s.classId === 'class-ece-a')) {
+          const initial = generateInitialSessions(INITIAL_CLASSES, INITIAL_STUDENTS);
+          const existingIds = new Set(parsed.map((s: AttendanceSession) => s.id));
+          const missing = initial.filter(s => !existingIds.has(s.id));
+          if (missing.length > 0) {
+            return [...parsed, ...missing];
+          }
           return parsed;
         }
       }
@@ -164,7 +178,39 @@ export default function App() {
   const [selectedClassId, setSelectedClassId] = useState<string>(() => classes[0]?.id || 'class-ece-a');
   const [selectedDate, setSelectedDate] = useState<string>(getTodayDateStr());
   const [currentTab, setCurrentTab] = useState<AppTab>('dashboard');
-  const [activeLectureSlotId, setActiveLectureSlotId] = useState<string | undefined>('slot-mon-1');
+  const [activeLectureSlotId, setActiveLectureSlotId] = useState<string | undefined>(() => {
+    return 'slot-mon-1';
+  });
+
+  // Automatically keep active lecture slot scoped to the logged-in teacher and selected date
+  useEffect(() => {
+    const day = getDayOfWeek(selectedDate);
+    if (currentUser?.role === 'teacher') {
+      const daySlots = timetable.filter(s => s.dayOfWeek === day && isSlotBelongsToTeacher(s, currentUser));
+      if (daySlots.length > 0) {
+        const isCurrentSlotValid = activeLectureSlotId && daySlots.some(s => s.id === activeLectureSlotId);
+        if (!isCurrentSlotValid) {
+          setActiveLectureSlotId(daySlots[0].id);
+          if (daySlots[0].classId && daySlots[0].classId !== selectedClassId) {
+            setSelectedClassId(daySlots[0].classId);
+          }
+        }
+      } else {
+        // No lectures scheduled for this teacher on this day
+        setActiveLectureSlotId(undefined);
+      }
+    } else if (currentUser?.role === 'hod') {
+      const daySlots = timetable.filter(s => s.dayOfWeek === day && (selectedClassId ? s.classId === selectedClassId : true));
+      if (daySlots.length > 0) {
+        const isCurrentSlotValid = activeLectureSlotId && daySlots.some(s => s.id === activeLectureSlotId);
+        if (!isCurrentSlotValid) {
+          setActiveLectureSlotId(daySlots[0].id);
+        }
+      } else {
+        setActiveLectureSlotId(undefined);
+      }
+    }
+  }, [currentUser, timetable, selectedDate, activeLectureSlotId, selectedClassId]);
 
   // Modals & Synchronization States
   const [isWhatsAppModalOpen, setIsWhatsAppModalOpen] = useState(false);
@@ -342,7 +388,10 @@ export default function App() {
     if (!userHasModifiedDataRef.current) return;
 
     // Fast signature to avoid re-uploading identical states
-    const stateSignature = `${settings.collegeName}_${classes.length}_${students.length}_${sessions.length}_${timetable.length}`;
+    const latestSessionUpdate = sessions.reduce((latest, s) => {
+      return (s.lastUpdated && s.lastUpdated > latest) ? s.lastUpdated : latest;
+    }, '');
+    const stateSignature = `${settings.collegeName}_${classes.length}_${students.length}_${sessions.length}_${latestSessionUpdate}_${timetable.length}`;
     if (lastSyncedHashRef.current === stateSignature) return;
 
     const timer = setTimeout(async () => {
@@ -375,29 +424,68 @@ export default function App() {
     return classes.find(c => c.id === selectedClassId) || classes[0];
   }, [classes, selectedClassId]);
 
-  // Find active slot details if any
+  // Scheduled timetable lectures for selectedDate and current user
+  const scheduledSlotsForSelectedDate = useMemo(() => {
+    return getLecturesForDateAndUser(
+      selectedDate,
+      currentUser,
+      timetable,
+      currentUser?.role === 'hod' ? selectedClassId : undefined
+    );
+  }, [selectedDate, currentUser, timetable, selectedClassId]);
+
+  const hasLectureOnSelectedDate = scheduledSlotsForSelectedDate.length > 0;
+
+  // Find active slot details with proper timing (falls back to first scheduled slot on this date)
   const activeSlot = useMemo(() => {
-    if (!activeLectureSlotId) return undefined;
-    return timetable.find(s => s.id === activeLectureSlotId);
-  }, [timetable, activeLectureSlotId]);
+    if (activeLectureSlotId) {
+      const found = timetable.find(s => s.id === activeLectureSlotId);
+      if (found) return found;
+    }
+    if (scheduledSlotsForSelectedDate.length > 0) {
+      return scheduledSlotsForSelectedDate[0];
+    }
+    return undefined;
+  }, [timetable, activeLectureSlotId, scheduledSlotsForSelectedDate]);
 
   // Current session for selected class, date, and lecture slot
   const currentSession = useMemo(() => {
-    // Look for session with matching classId, date, and lecture slot
+    // Look for session with matching classId, date, and lecture slot (or teacher match)
     const existing = sessions.find(s => 
       s.classId === selectedClassId && 
       s.date === selectedDate && 
-      (activeLectureSlotId ? s.lectureSlotId === activeLectureSlotId : true)
+      (activeLectureSlotId ? s.lectureSlotId === activeLectureSlotId : (currentUser?.role === 'teacher' ? isSessionBelongsToTeacher(s, currentUser, timetable) : true))
     );
 
-    if (existing) return existing;
+    if (existing) {
+      // Only populate records for students who have no record entry at all (default to 'unmarked')
+      let recordsUpdated = false;
+      const records = { ...existing.records };
+      currentClass.studentIds.forEach(stId => {
+        if (!records[stId]) {
+          recordsUpdated = true;
+          records[stId] = {
+            studentId: stId,
+            status: 'unmarked',
+            timestamp: new Date().toISOString()
+          };
+        }
+      });
+      if (recordsUpdated) {
+        return {
+          ...existing,
+          records
+        };
+      }
+      return existing;
+    }
 
-    // Create session template if not found
+    // Create session template if not found - students default to 'unmarked' (blank) until recorded
     const defaultRecords: Record<string, { studentId: string; status: AttendanceStatus; timestamp: string; note?: string }> = {};
     currentClass.studentIds.forEach(stId => {
       defaultRecords[stId] = {
         studentId: stId,
-        status: 'present',
+        status: 'unmarked',
         timestamp: new Date().toISOString()
       };
     });
@@ -406,20 +494,25 @@ export default function App() {
       ? `${activeSlot.timeSlotLabel} - ${activeSlot.subject}`
       : `${currentClass.name} Session`;
 
+    const teacherName = currentUser?.role === 'teacher' ? currentUser.name : (activeSlot?.teacherName || currentClass.teacherName);
+    const teacherId = currentUser?.role === 'teacher' ? currentUser.id : activeSlot?.teacherId;
+    const subject = activeSlot?.subject || (currentUser?.role === 'teacher' && currentUser.assignedSubjects?.[0] ? currentUser.assignedSubjects[0] : currentClass.subject);
+
     return {
       id: `${selectedClassId}_${selectedDate}_${activeLectureSlotId || 'general'}`,
       classId: selectedClassId,
       date: selectedDate,
       sessionName,
-      teacherName: activeSlot?.teacherName || currentClass.teacherName,
+      teacherName,
+      teacherId,
       lectureSlotId: activeLectureSlotId,
       timeSlot: activeSlot?.timeSlotLabel,
-      subject: activeSlot?.subject || currentClass.subject,
+      subject,
       records: defaultRecords,
       lastUpdated: new Date().toISOString(),
       remarks: ''
     };
-  }, [sessions, selectedClassId, selectedDate, activeLectureSlotId, currentClass, activeSlot]);
+  }, [sessions, selectedClassId, selectedDate, activeLectureSlotId, currentClass, activeSlot, currentUser, timetable]);
 
   const notifyUserChange = useCallback(() => {
     userHasModifiedDataRef.current = true;
@@ -427,12 +520,18 @@ export default function App() {
 
   // Real-time Update individual record (ticking checkbox, setting absent, late, or adding note)
   const handleUpdateRecord = useCallback((studentId: string, status: AttendanceStatus, note?: string) => {
+    if (currentUser?.role === 'teacher' && !hasLectureOnSelectedDate) {
+      showToast("Cannot record attendance: You have no scheduled lectures on this date.", "error");
+      return;
+    }
     notifyUserChange();
     setSessions(prevSessions => {
       const sessionIndex = prevSessions.findIndex(s => 
-        s.classId === selectedClassId && 
-        s.date === selectedDate &&
-        (activeLectureSlotId ? s.lectureSlotId === activeLectureSlotId : true)
+        s.id === currentSession.id || (
+          s.classId === selectedClassId && 
+          s.date === selectedDate && 
+          (activeLectureSlotId ? s.lectureSlotId === activeLectureSlotId : true)
+        )
       );
       const timestamp = new Date().toISOString();
 
@@ -457,6 +556,7 @@ export default function App() {
 
         const updatedSession: AttendanceSession = {
           ...session,
+          dayOfWeek: session.dayOfWeek || getDayOfWeek(selectedDate),
           records: updatedRecords,
           lastUpdated: timestamp
         };
@@ -466,11 +566,12 @@ export default function App() {
         return next;
       } else {
         // Create new session entry
+        const sessionDay = getDayOfWeek(selectedDate);
         const newRecords: Record<string, { studentId: string; status: AttendanceStatus; timestamp: string; note?: string }> = {};
         currentClass.studentIds.forEach(id => {
           const itemRecord: { studentId: string; status: AttendanceStatus; timestamp: string; note?: string } = {
             studentId: id,
-            status: id === studentId ? status : 'present',
+            status: id === studentId ? status : (currentSession.records[id]?.status || 'unmarked'),
             timestamp
           };
           if (id === studentId && note && note.trim()) {
@@ -479,15 +580,21 @@ export default function App() {
           newRecords[id] = itemRecord;
         });
 
+        const effectiveTeacherName = currentUser?.role === 'teacher' ? currentUser.name : (activeSlot?.teacherName || currentClass.teacherName);
+        const effectiveTeacherId = currentUser?.role === 'teacher' ? currentUser.id : activeSlot?.teacherId;
+        const effectiveSubject = activeSlot?.subject || (currentUser?.role === 'teacher' && currentUser.assignedSubjects?.[0] ? currentUser.assignedSubjects[0] : currentClass.subject);
+
         const newSession: AttendanceSession = {
-          id: `${selectedClassId}_${selectedDate}_${activeLectureSlotId || 'general'}`,
+          id: currentSession.id,
           classId: selectedClassId,
           date: selectedDate,
-          sessionName: activeSlot ? `${activeSlot.timeSlotLabel} - ${activeSlot.subject}` : 'Lecture Session',
-          teacherName: activeSlot?.teacherName || currentClass.teacherName,
+          dayOfWeek: sessionDay,
+          sessionName: activeSlot ? `${activeSlot.timeSlotLabel} - ${activeSlot.subject}` : `${currentClass.name} Session`,
+          teacherName: effectiveTeacherName,
+          teacherId: effectiveTeacherId,
           lectureSlotId: activeLectureSlotId,
           timeSlot: activeSlot?.timeSlotLabel,
-          subject: activeSlot?.subject || currentClass.subject,
+          subject: effectiveSubject,
           records: newRecords,
           lastUpdated: timestamp,
           remarks: ''
@@ -496,22 +603,28 @@ export default function App() {
         return [...prevSessions, newSession];
       }
     });
-  }, [selectedClassId, selectedDate, activeLectureSlotId, currentClass, activeSlot]);
+  }, [selectedClassId, selectedDate, activeLectureSlotId, currentClass, activeSlot, currentUser, notifyUserChange, currentSession, hasLectureOnSelectedDate]);
 
-  // Batch update
+  // Batch update (All Present, All Absent, or Clear All)
   const handleBatchUpdate = useCallback((status: AttendanceStatus) => {
+    if (currentUser?.role === 'teacher' && !hasLectureOnSelectedDate) {
+      showToast("Cannot record attendance: You have no scheduled lectures on this date.", "error");
+      return;
+    }
     notifyUserChange();
     setSessions(prevSessions => {
       const sessionIndex = prevSessions.findIndex(s => 
-        s.classId === selectedClassId && 
-        s.date === selectedDate &&
-        (activeLectureSlotId ? s.lectureSlotId === activeLectureSlotId : true)
+        s.id === currentSession.id || (
+          s.classId === selectedClassId && 
+          s.date === selectedDate && 
+          (activeLectureSlotId ? s.lectureSlotId === activeLectureSlotId : true)
+        )
       );
       const timestamp = new Date().toISOString();
 
       const updatedRecords: Record<string, { studentId: string; status: AttendanceStatus; timestamp: string; note?: string }> = {};
       currentClass.studentIds.forEach(stId => {
-        const existingNote = sessionIndex >= 0 ? prevSessions[sessionIndex].records[stId]?.note : undefined;
+        const existingNote = sessionIndex >= 0 ? prevSessions[sessionIndex].records[stId]?.note : currentSession.records[stId]?.note;
         const recItem: { studentId: string; status: AttendanceStatus; timestamp: string; note?: string } = {
           studentId: stId,
           status,
@@ -527,6 +640,7 @@ export default function App() {
         const session = prevSessions[sessionIndex];
         const updatedSession: AttendanceSession = {
           ...session,
+          dayOfWeek: session.dayOfWeek || getDayOfWeek(selectedDate),
           records: updatedRecords,
           lastUpdated: timestamp
         };
@@ -534,15 +648,21 @@ export default function App() {
         next[sessionIndex] = updatedSession;
         return next;
       } else {
+        const effectiveTeacherName = currentUser?.role === 'teacher' ? currentUser.name : (activeSlot?.teacherName || currentClass.teacherName);
+        const effectiveTeacherId = currentUser?.role === 'teacher' ? currentUser.id : activeSlot?.teacherId;
+        const effectiveSubject = activeSlot?.subject || (currentUser?.role === 'teacher' && currentUser.assignedSubjects?.[0] ? currentUser.assignedSubjects[0] : currentClass.subject);
+
         const newSession: AttendanceSession = {
-          id: `${selectedClassId}_${selectedDate}_${activeLectureSlotId || 'general'}`,
+          id: currentSession.id,
           classId: selectedClassId,
           date: selectedDate,
-          sessionName: activeSlot ? `${activeSlot.timeSlotLabel} - ${activeSlot.subject}` : 'Lecture Session',
-          teacherName: activeSlot?.teacherName || currentClass.teacherName,
+          dayOfWeek: getDayOfWeek(selectedDate),
+          sessionName: activeSlot ? `${activeSlot.timeSlotLabel} - ${activeSlot.subject}` : `${currentClass.name} Session`,
+          teacherName: effectiveTeacherName,
+          teacherId: effectiveTeacherId,
           lectureSlotId: activeLectureSlotId,
           timeSlot: activeSlot?.timeSlotLabel,
-          subject: activeSlot?.subject || currentClass.subject,
+          subject: effectiveSubject,
           records: updatedRecords,
           lastUpdated: timestamp,
           remarks: ''
@@ -550,24 +670,45 @@ export default function App() {
         return [...prevSessions, newSession];
       }
     });
-  }, [selectedClassId, selectedDate, activeLectureSlotId, currentClass, activeSlot, notifyUserChange]);
+
+    if (status === 'unmarked') {
+      showToast("Attendance cleared. All students reset to blank.", "info");
+    } else if (status === 'present') {
+      showToast(`All ${currentClass.studentIds.length} students marked Present.`, "success");
+    } else if (status === 'absent') {
+      showToast(`All ${currentClass.studentIds.length} students marked Absent.`, "info");
+    }
+  }, [selectedClassId, selectedDate, activeLectureSlotId, currentClass, activeSlot, currentUser, notifyUserChange, currentSession, hasLectureOnSelectedDate]);
 
   // Invert Selection
   const handleInvertSelection = useCallback(() => {
+    if (currentUser?.role === 'teacher' && !hasLectureOnSelectedDate) {
+      showToast("Cannot record attendance: You have no scheduled lectures on this date.", "error");
+      return;
+    }
     notifyUserChange();
     setSessions(prevSessions => {
       const sessionIndex = prevSessions.findIndex(s => 
-        s.classId === selectedClassId && 
-        s.date === selectedDate &&
-        (activeLectureSlotId ? s.lectureSlotId === activeLectureSlotId : true)
+        s.id === currentSession.id || (
+          s.classId === selectedClassId && 
+          s.date === selectedDate && 
+          (activeLectureSlotId ? s.lectureSlotId === activeLectureSlotId : true)
+        )
       );
       const timestamp = new Date().toISOString();
 
       const updatedRecords: Record<string, { studentId: string; status: AttendanceStatus; timestamp: string; note?: string }> = {};
       currentClass.studentIds.forEach(stId => {
         const currentRecord = currentSession.records[stId];
-        const currentStatus = currentRecord?.status || 'present';
-        const invertedStatus: AttendanceStatus = currentStatus === 'present' ? 'absent' : 'present';
+        const currentStatus = currentRecord?.status || 'unmarked';
+        let invertedStatus: AttendanceStatus = 'present';
+        if (currentStatus === 'present') {
+          invertedStatus = 'absent';
+        } else if (currentStatus === 'absent') {
+          invertedStatus = 'present';
+        } else {
+          invertedStatus = 'present';
+        }
         
         updatedRecords[stId] = {
           studentId: stId,
@@ -581,6 +722,7 @@ export default function App() {
         const session = prevSessions[sessionIndex];
         const updatedSession: AttendanceSession = {
           ...session,
+          dayOfWeek: session.dayOfWeek || getDayOfWeek(selectedDate),
           records: updatedRecords,
           lastUpdated: timestamp
         };
@@ -588,15 +730,21 @@ export default function App() {
         next[sessionIndex] = updatedSession;
         return next;
       } else {
+        const effectiveTeacherName = currentUser?.role === 'teacher' ? currentUser.name : (activeSlot?.teacherName || currentClass.teacherName);
+        const effectiveTeacherId = currentUser?.role === 'teacher' ? currentUser.id : activeSlot?.teacherId;
+        const effectiveSubject = activeSlot?.subject || (currentUser?.role === 'teacher' && currentUser.assignedSubjects?.[0] ? currentUser.assignedSubjects[0] : currentClass.subject);
+
         const newSession: AttendanceSession = {
-          id: `${selectedClassId}_${selectedDate}_${activeLectureSlotId || 'general'}`,
+          id: currentSession.id,
           classId: selectedClassId,
           date: selectedDate,
-          sessionName: activeSlot ? `${activeSlot.timeSlotLabel} - ${activeSlot.subject}` : 'Lecture Session',
-          teacherName: activeSlot?.teacherName || currentClass.teacherName,
+          dayOfWeek: getDayOfWeek(selectedDate),
+          sessionName: activeSlot ? `${activeSlot.timeSlotLabel} - ${activeSlot.subject}` : `${currentClass.name} Session`,
+          teacherName: effectiveTeacherName,
+          teacherId: effectiveTeacherId,
           lectureSlotId: activeLectureSlotId,
           timeSlot: activeSlot?.timeSlotLabel,
-          subject: activeSlot?.subject || currentClass.subject,
+          subject: effectiveSubject,
           records: updatedRecords,
           lastUpdated: timestamp,
           remarks: ''
@@ -604,16 +752,18 @@ export default function App() {
         return [...prevSessions, newSession];
       }
     });
-  }, [selectedClassId, selectedDate, activeLectureSlotId, currentClass, currentSession, activeSlot, notifyUserChange]);
+  }, [selectedClassId, selectedDate, activeLectureSlotId, currentClass, currentSession, activeSlot, currentUser, notifyUserChange, hasLectureOnSelectedDate]);
 
   // Update remarks
   const handleUpdateSessionRemarks = useCallback((remarks: string) => {
     notifyUserChange();
     setSessions(prevSessions => {
       const sessionIndex = prevSessions.findIndex(s => 
-        s.classId === selectedClassId && 
-        s.date === selectedDate &&
-        (activeLectureSlotId ? s.lectureSlotId === activeLectureSlotId : true)
+        s.id === currentSession.id || (
+          s.classId === selectedClassId && 
+          s.date === selectedDate && 
+          (activeLectureSlotId ? s.lectureSlotId === activeLectureSlotId : true)
+        )
       );
       const timestamp = new Date().toISOString();
 
@@ -621,6 +771,7 @@ export default function App() {
         const session = prevSessions[sessionIndex];
         const updatedSession: AttendanceSession = {
           ...session,
+          dayOfWeek: session.dayOfWeek || getDayOfWeek(selectedDate),
           remarks,
           lastUpdated: timestamp
         };
@@ -628,15 +779,21 @@ export default function App() {
         next[sessionIndex] = updatedSession;
         return next;
       } else {
+        const effectiveTeacherName = currentUser?.role === 'teacher' ? currentUser.name : (activeSlot?.teacherName || currentClass.teacherName);
+        const effectiveTeacherId = currentUser?.role === 'teacher' ? currentUser.id : activeSlot?.teacherId;
+        const effectiveSubject = activeSlot?.subject || (currentUser?.role === 'teacher' && currentUser.assignedSubjects?.[0] ? currentUser.assignedSubjects[0] : currentClass.subject);
+
         const newSession: AttendanceSession = {
-          id: `${selectedClassId}_${selectedDate}_${activeLectureSlotId || 'general'}`,
+          id: currentSession.id,
           classId: selectedClassId,
           date: selectedDate,
-          sessionName: activeSlot ? `${activeSlot.timeSlotLabel} - ${activeSlot.subject}` : 'Lecture Session',
-          teacherName: activeSlot?.teacherName || currentClass.teacherName,
+          dayOfWeek: getDayOfWeek(selectedDate),
+          sessionName: activeSlot ? `${activeSlot.timeSlotLabel} - ${activeSlot.subject}` : `${currentClass.name} Session`,
+          teacherName: effectiveTeacherName,
+          teacherId: effectiveTeacherId,
           lectureSlotId: activeLectureSlotId,
           timeSlot: activeSlot?.timeSlotLabel,
-          subject: activeSlot?.subject || currentClass.subject,
+          subject: effectiveSubject,
           records: currentSession.records,
           lastUpdated: timestamp,
           remarks
@@ -644,7 +801,7 @@ export default function App() {
         return [...prevSessions, newSession];
       }
     });
-  }, [selectedClassId, selectedDate, activeLectureSlotId, currentClass, currentSession, activeSlot, notifyUserChange]);
+  }, [selectedClassId, selectedDate, activeLectureSlotId, currentClass, currentSession, activeSlot, currentUser, notifyUserChange]);
 
   // Add individual student
   const handleAddStudent = (newStudentData: Omit<Student, 'id'>) => {
@@ -714,6 +871,10 @@ export default function App() {
 
   // Lecture Slot Click Handler (Req 13: "Suppose it's 8 to 9 am lecture ... So by clicking on that lecture teachers can tick the attendance")
   const handleSelectLecture = (slot: TimetableSlot, date: string) => {
+    if (currentUser?.role === 'teacher' && !isSlotBelongsToTeacher(slot, currentUser)) {
+      showToast("Access restricted: You can only select and mark attendance for your own lectures.", "error");
+      return;
+    }
     setSelectedDate(date);
     setSelectedClassId(slot.classId);
     setActiveLectureSlotId(slot.id);
@@ -725,9 +886,11 @@ export default function App() {
     const threshold = settings.defaulterThreshold || 50;
     let count = 0;
 
+    const scopedSessions = filterSessionsForUser(sessions, currentUser, timetable);
+
     students.forEach(st => {
       const studentClasses = classes.filter(c => c.studentIds.includes(st.id));
-      const relevantSessions = sessions.filter(s => 
+      const relevantSessions = scopedSessions.filter(s => 
         studentClasses.some(c => c.id === s.classId)
       );
 
@@ -748,7 +911,7 @@ export default function App() {
     });
 
     return count;
-  }, [students, classes, sessions, settings.defaulterThreshold]);
+  }, [students, classes, sessions, settings.defaulterThreshold, currentUser, timetable]);
 
   // Total present for header badge
   const totalPresentCount = useMemo(() => {
@@ -769,6 +932,76 @@ export default function App() {
     setTimeout(() => {
       setToast(prev => (prev?.message === message ? null : prev));
     }, 4500);
+  };
+
+  // Explicitly Save Attendance Session Permanently to Local Storage and Cloud Database
+  const handleSaveAttendancePermanently = async () => {
+    if (currentUser?.role === 'teacher' && !hasLectureOnSelectedDate) {
+      showToast("Cannot save attendance: No lecture is scheduled for you on this day.", "error");
+      return;
+    }
+    notifyUserChange();
+    const timestamp = new Date().toISOString();
+    const sessionDay = getDayOfWeek(selectedDate);
+
+    // Compute present and absent counts for feedback
+    let presentCount = 0;
+    let absentCount = 0;
+    currentClass.studentIds.forEach(id => {
+      const rec = currentSession.records[id];
+      if (rec?.status === 'present') presentCount++;
+      else if (rec?.status === 'absent') absentCount++;
+    });
+
+    const sessionToSave: AttendanceSession = {
+      ...currentSession,
+      dayOfWeek: currentSession.dayOfWeek || sessionDay,
+      lastUpdated: timestamp
+    };
+
+    const nextSessions = [...sessions];
+    const sessionIndex = nextSessions.findIndex(s => 
+      s.id === currentSession.id || (
+        s.classId === selectedClassId && 
+        s.date === selectedDate &&
+        (activeLectureSlotId ? s.lectureSlotId === activeLectureSlotId : true)
+      )
+    );
+
+    if (sessionIndex >= 0) {
+      nextSessions[sessionIndex] = sessionToSave;
+    } else {
+      nextSessions.push(sessionToSave);
+    }
+
+    setSessions(nextSessions);
+
+    // Instant local storage persistence
+    try {
+      localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(nextSessions));
+    } catch (_) {}
+
+    // Immediate cloud push
+    setCloudSyncing(true);
+    try {
+      await dbService.saveEntireCampusState({
+        settings,
+        classes,
+        students,
+        teachers,
+        classrooms,
+        timetable,
+        sessions: nextSessions
+      });
+      showToast(
+        `Attendance for ${sessionDay}, ${selectedDate} saved permanently! (${presentCount} Present, ${absentCount} Absent) stored in cloud database.`,
+        'success'
+      );
+    } catch (err: any) {
+      showToast(`Saved locally! Cloud sync notice: ${err?.message || 'Will sync when online'}`, 'info');
+    } finally {
+      setCloudSyncing(false);
+    }
   };
 
   // Permanently delete student from campus database
@@ -910,17 +1143,28 @@ export default function App() {
         teachers={teachers}
         onLoginSuccess={(user) => {
           setCurrentUser(user);
-          // If teacher, set their first assigned class as active
-          if (user.role === 'teacher' && user.assignedClasses && user.assignedClasses[0]) {
-            setSelectedClassId(user.assignedClasses[0]);
+          // If teacher, set their first assigned class as active and initial slot
+          if (user.role === 'teacher') {
+            if (user.assignedClasses && user.assignedClasses[0]) {
+              setSelectedClassId(user.assignedClasses[0]);
+            }
+            const teacherSlot = timetable.find(s => isSlotBelongsToTeacher(s, user));
+            if (teacherSlot) {
+              setActiveLectureSlotId(teacherSlot.id);
+            }
           }
         }}
       />
     );
   }
 
+  // Classes filtered to teacher's assigned classes if teacher role
+  const visibleClasses = (currentUser.role === 'teacher' && currentUser.assignedClasses && currentUser.assignedClasses.length > 0)
+    ? classes.filter(c => currentUser.assignedClasses!.includes(c.id))
+    : classes;
+
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans relative">
+    <div className="min-h-screen bg-slate-50 flex flex-col font-sans relative overflow-x-hidden min-w-0">
       
       {/* Toast Notification Banner */}
       {toast && (
@@ -945,7 +1189,7 @@ export default function App() {
       <Header
         currentTab={currentTab}
         onTabChange={setCurrentTab}
-        classes={classes}
+        classes={visibleClasses.length > 0 ? visibleClasses : classes}
         selectedClassId={selectedClassId}
         onClassChange={(id) => {
           setSelectedClassId(id);
@@ -987,20 +1231,22 @@ export default function App() {
 
             <div className="flex items-center gap-2">
               <span className="text-sky-700 font-semibold">Ticking Live Attendance for this lecture</span>
-              <button
-                type="button"
-                onClick={() => setActiveLectureSlotId(undefined)}
-                className="text-[11px] text-sky-600 hover:text-sky-900 underline font-bold cursor-pointer"
-              >
-                Clear Lecture Filter
-              </button>
+              {currentUser.role === 'hod' && (
+                <button
+                  type="button"
+                  onClick={() => setActiveLectureSlotId(undefined)}
+                  className="text-[11px] text-sky-600 hover:text-sky-900 underline font-bold cursor-pointer"
+                >
+                  Clear Lecture Filter
+                </button>
+              )}
             </div>
           </div>
         </div>
       )}
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 min-w-0 overflow-x-hidden">
         
         {/* VIEW 1: MARK ATTENDANCE */}
         {currentTab === 'dashboard' && (
@@ -1014,6 +1260,22 @@ export default function App() {
               onInvertSelection={handleInvertSelection}
               onUpdateSessionRemarks={handleUpdateSessionRemarks}
               onOpenWhatsApp={() => setIsWhatsAppModalOpen(true)}
+              onSaveAttendancePermanently={handleSaveAttendancePermanently}
+              onNavigateToRegister={() => setCurrentTab('defaulters')}
+              currentUser={currentUser}
+              timetable={timetable}
+              selectedDate={selectedDate}
+              hasLectureOnDate={hasLectureOnSelectedDate}
+              dayLectures={scheduledSlotsForSelectedDate}
+              activeLectureSlotId={activeLectureSlotId}
+              activeSlot={activeSlot}
+              onSelectLectureSlot={(slotId) => {
+                setActiveLectureSlotId(slotId);
+                const slot = timetable.find(s => s.id === slotId);
+                if (slot?.classId) setSelectedClassId(slot.classId);
+              }}
+              onNavigateToTimetable={() => setCurrentTab('timetable')}
+              onSelectDate={setSelectedDate}
             />
           </div>
         )}
@@ -1033,7 +1295,7 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 3: DEFAULTER LIST & PARENT WARNING ALERTS (Req 15, 16) */}
+        {/* VIEW 3: TAKEN ATTENDANCE REGISTER & DEFAULTERS (Req 15, 16) */}
         {currentTab === 'defaulters' && (
           <DefaultersView
             students={students}
@@ -1042,6 +1304,15 @@ export default function App() {
             settings={settings}
             onUpdateThreshold={(val) => setSettings(prev => ({ ...prev, defaulterThreshold: val }))}
             userRole={currentUser.role}
+            currentUser={currentUser}
+            timetable={timetable}
+            onNavigateToSession={(classId, date, slotId) => {
+              setSelectedClassId(classId);
+              setSelectedDate(date);
+              setActiveLectureSlotId(slotId);
+              setCurrentTab('dashboard');
+            }}
+            onOpenWhatsAppModal={() => setIsWhatsAppModalOpen(true)}
           />
         )}
 
@@ -1052,6 +1323,8 @@ export default function App() {
             currentClass={currentClass}
             students={students}
             onOpenWhatsApp={() => setIsWhatsAppModalOpen(true)}
+            currentUser={currentUser}
+            timetable={timetable}
           />
         )}
 

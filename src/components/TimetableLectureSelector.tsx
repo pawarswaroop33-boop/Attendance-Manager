@@ -10,9 +10,12 @@ import {
   ChevronRight,
   Filter,
   CalendarDays,
-  Sparkles
+  Sparkles,
+  Lock,
+  UserCheck
 } from 'lucide-react';
 import { TimetableSlot, AttendanceSession, DayOfWeek, AuthUser } from '../types';
+import { isSlotBelongsToTeacher } from '../utils/teacherFilter';
 
 interface TimetableLectureSelectorProps {
   timetable: TimetableSlot[];
@@ -36,27 +39,37 @@ export const TimetableLectureSelector: React.FC<TimetableLectureSelectorProps> =
   activeLectureSlotId
 }) => {
   // Determine day of week from selectedDate
-  const getDayOfWeek = (dateStr: string): DayOfWeek => {
+  const getDayOfWeek = (dateStr: string): string => {
     const d = new Date(dateStr + 'T00:00:00');
     const dayIndex = d.getDay(); // 0 is Sunday
-    if (dayIndex === 0) return 'Monday'; // Default to Monday if Sunday picked
+    if (dayIndex === 0) return 'Sunday';
     return DAYS_OF_WEEK[dayIndex - 1];
   };
 
   const currentDayOfWeek = getDayOfWeek(selectedDate);
-  const [filterMyLecturesOnly, setFilterMyLecturesOnly] = useState(currentUser.role === 'teacher');
+  const [hodSelectedTeacherFilter, setHodSelectedTeacherFilter] = useState<string>('all');
 
-  // Filter slots for current day
+  // Filter slots for current day and user scope
   const daySlots = timetable
     .filter(slot => slot.dayOfWeek === currentDayOfWeek)
     .filter(slot => {
-      if (currentUser.role === 'teacher' && filterMyLecturesOnly) {
-        return slot.teacherName.toLowerCase().includes(currentUser.name.toLowerCase()) ||
-               (currentUser.assignedSubjects && currentUser.assignedSubjects.includes(slot.subject));
+      // If logged in as specific teacher: STRICTLY show only their lectures
+      if (currentUser.role === 'teacher') {
+        return isSlotBelongsToTeacher(slot, currentUser);
+      }
+      // If HOD: allow filtering by teacher or showing all
+      if (currentUser.role === 'hod' && hodSelectedTeacherFilter !== 'all') {
+        return slot.teacherId === hodSelectedTeacherFilter || 
+               slot.teacherName.toLowerCase().includes(hodSelectedTeacherFilter.toLowerCase());
       }
       return true;
     })
     .sort((a, b) => a.startTime.localeCompare(b.startTime));
+
+  // Extract list of unique teachers for HOD filter
+  const uniqueTeachers = Array.from(
+    new Set(timetable.map(s => JSON.stringify({ id: s.teacherId, name: s.teacherName })))
+  ).map(str => JSON.parse(str) as { id: string; name: string });
 
   // Check if a slot already has an attendance session marked
   const getSlotSessionStatus = (slot: TimetableSlot) => {
@@ -78,23 +91,33 @@ export const TimetableLectureSelector: React.FC<TimetableLectureSelectorProps> =
   return (
     <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-xs space-y-4">
       
-      {/* Header bar: Date picker, Day tabs, and Toggle */}
+      {/* Header bar: Date picker, Day tabs, and Scope Notice */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-100">
         <div className="flex items-center gap-2.5">
           <span className="w-8 h-8 rounded-xl bg-sky-500/10 text-sky-600 flex items-center justify-center shrink-0">
             <Clock className="w-4 h-4" />
           </span>
           <div>
-            <h2 className="text-sm sm:text-base font-bold text-slate-900">
-              Interactive Timetable & Lecture Schedule
-            </h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm sm:text-base font-bold text-slate-900">
+                Interactive Timetable & Lecture Schedule
+              </h2>
+              {currentUser.role === 'teacher' && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-extrabold">
+                  <Lock className="w-2.5 h-2.5" />
+                  Your Assigned Lectures Only
+                </span>
+              )}
+            </div>
             <p className="text-xs text-slate-500">
-              Select any lecture slot (e.g. 08:00 AM - 09:00 AM) to immediately tick attendance
+              {currentUser.role === 'teacher' 
+                ? `Showing exclusively lectures scheduled for ${currentUser.name}. Click any slot to tick attendance.`
+                : 'Select any lecture slot to immediately tick attendance.'}
             </p>
           </div>
         </div>
 
-        {/* Date Selector & My Lectures Filter */}
+        {/* Date Selector & Scope Info */}
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded-xl">
             <Calendar className="w-3.5 h-3.5 text-slate-500" />
@@ -107,19 +130,28 @@ export const TimetableLectureSelector: React.FC<TimetableLectureSelectorProps> =
             />
           </div>
 
-          {currentUser.role === 'teacher' && (
-            <button
-              type="button"
-              onClick={() => setFilterMyLecturesOnly(!filterMyLecturesOnly)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border ${
-                filterMyLecturesOnly 
-                  ? 'bg-emerald-50 border-emerald-300 text-emerald-800' 
-                  : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
-              }`}
-            >
-              <Filter className="w-3 h-3" />
-              <span>{filterMyLecturesOnly ? 'My Lectures Only' : 'All Lectures'}</span>
-            </button>
+          {/* Teacher Badge or HOD Filter */}
+          {currentUser.role === 'teacher' ? (
+            <div className="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-50 border border-emerald-200 text-emerald-900 flex items-center gap-1.5">
+              <UserCheck className="w-3.5 h-3.5 text-emerald-600" />
+              <span>{currentUser.name}</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 px-2 py-1 rounded-xl text-xs">
+              <Filter className="w-3.5 h-3.5 text-slate-500" />
+              <select
+                value={hodSelectedTeacherFilter}
+                onChange={(e) => setHodSelectedTeacherFilter(e.target.value)}
+                className="bg-transparent text-xs font-semibold text-slate-800 focus:outline-hidden cursor-pointer"
+              >
+                <option value="all">All Faculty Lectures</option>
+                {uniqueTeachers.map(t => (
+                  <option key={t.id || t.name} value={t.id || t.name}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           )}
         </div>
       </div>
@@ -128,7 +160,14 @@ export const TimetableLectureSelector: React.FC<TimetableLectureSelectorProps> =
       <div className="flex items-center gap-1 overflow-x-auto pb-1 text-xs">
         {DAYS_OF_WEEK.map(day => {
           const isSelected = day === currentDayOfWeek;
-          const slotsCount = timetable.filter(s => s.dayOfWeek === day).length;
+          const slotsCount = timetable.filter(s => {
+            if (s.dayOfWeek !== day) return false;
+            if (currentUser.role === 'teacher') return isSlotBelongsToTeacher(s, currentUser);
+            if (currentUser.role === 'hod' && hodSelectedTeacherFilter !== 'all') {
+              return s.teacherId === hodSelectedTeacherFilter || s.teacherName.toLowerCase().includes(hodSelectedTeacherFilter.toLowerCase());
+            }
+            return true;
+          }).length;
 
           return (
             <button
@@ -163,10 +202,28 @@ export const TimetableLectureSelector: React.FC<TimetableLectureSelectorProps> =
 
       {/* Slots List */}
       {daySlots.length === 0 ? (
-        <div className="p-8 text-center bg-slate-50 rounded-xl border border-slate-200 text-slate-500 space-y-1">
-          <CalendarDays className="w-8 h-8 text-slate-400 mx-auto" />
-          <p className="text-xs font-bold text-slate-700">No lectures scheduled for {currentDayOfWeek}</p>
-          <p className="text-[11px] text-slate-500">HOD can add new slots from the HOD Control Center.</p>
+        <div className="p-8 text-center bg-amber-50/60 rounded-2xl border border-amber-200 text-slate-700 space-y-2 max-w-xl mx-auto my-4">
+          <div className="w-12 h-12 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center mx-auto">
+            <CalendarDays className="w-6 h-6" />
+          </div>
+          <div className="space-y-1">
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-200 text-amber-900 text-[10px] font-extrabold uppercase tracking-wider">
+              No Lectures
+            </span>
+            <h3 className="text-base font-extrabold text-slate-900">
+              There is no lecture today ({currentDayOfWeek})
+            </h3>
+            <p className="text-xs text-slate-600 max-w-md mx-auto">
+              {currentUser.role === 'teacher' 
+                ? `No lectures are scheduled for ${currentUser.name} on ${currentDayOfWeek}. Faculty can only take attendance on days with scheduled lectures.` 
+                : `No lectures are scheduled on ${currentDayOfWeek}.`}
+            </p>
+          </div>
+          <p className="text-[11px] text-slate-500 pt-1">
+            {currentUser.role === 'teacher'
+              ? 'Click on your scheduled lecture days above to select a lecture and tick attendance.'
+              : 'Lectures can be added from the HOD Control Center.'}
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">

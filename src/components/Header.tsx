@@ -11,7 +11,8 @@ import {
   LogOut, 
   Cloud, 
   GraduationCap, 
-  Sparkles 
+  Sparkles,
+  ClipboardList
 } from 'lucide-react';
 import { ClassGroup, AuthUser, SystemSettings } from '../types';
 
@@ -194,7 +195,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Navigation Tabs Bar - Clean swipeable tabs */}
-        <nav className="flex items-center gap-1 border-t border-slate-100 pt-1.5 pb-2 overflow-x-auto no-scrollbar">
+        <nav className="flex items-center gap-1 sm:gap-1.5 border-t border-slate-100 pt-1.5 pb-2 overflow-x-auto no-scrollbar w-full max-w-full scroll-smooth">
           
           <button
             id="tab-dashboard"
@@ -230,15 +231,16 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={() => onTabChange('defaulters')}
             className={`flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap cursor-pointer shrink-0 min-h-[38px] ${
               currentTab === 'defaulters'
-                ? 'bg-rose-600 text-white shadow-xs'
-                : 'text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200'
             }`}
+            title="Attendance Log & Defaulters Register"
           >
-            <AlertTriangle className="w-3.5 h-3.5" />
-            <span>Defaulters</span>
+            <ClipboardList className={`w-3.5 h-3.5 ${currentTab === 'defaulters' ? 'text-emerald-400' : 'text-slate-500'}`} />
+            <span>Attendance Log</span>
             {defaultersCount > 0 && (
               <span className={`text-[10px] font-extrabold px-1.5 py-0.2 rounded-full ${
-                currentTab === 'defaulters' ? 'bg-white text-rose-700' : 'bg-rose-600 text-white'
+                currentTab === 'defaulters' ? 'bg-rose-500 text-white' : 'bg-rose-100 text-rose-700'
               }`}>
                 {defaultersCount}
               </span>

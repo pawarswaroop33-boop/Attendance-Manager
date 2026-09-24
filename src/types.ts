@@ -74,8 +74,10 @@ export interface AttendanceSession {
   id: string; // e.g. "class1_2026-09-22" or "class1_2026-09-22_slot1"
   classId: string;
   date: string; // YYYY-MM-DD
+  dayOfWeek?: string; // e.g. "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
   sessionName: string; // e.g. "08:00 AM - 09:00 AM - Data Structures"
   teacherName: string;
+  teacherId?: string;
   lectureSlotId?: string;
   timeSlot?: string;
   subject?: string;

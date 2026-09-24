@@ -11,8 +11,9 @@ import {
   Search,
   Award
 } from 'lucide-react';
-import { AttendanceSession, ClassGroup, Student } from '../types';
+import { AttendanceSession, ClassGroup, Student, AuthUser, TimetableSlot } from '../types';
 import { generateAnalyticsReportMessage, generateDefaulterWarningMessage, shareToWhatsApp } from '../utils/whatsapp';
+import { isSessionBelongsToTeacher } from '../utils/teacherFilter';
 
 interface AnalyticsViewProps {
   sessions: AttendanceSession[];
@@ -20,6 +21,8 @@ interface AnalyticsViewProps {
   allStudents?: Student[];
   students?: Student[];
   onOpenWhatsApp: () => void;
+  currentUser?: AuthUser;
+  timetable?: TimetableSlot[];
 }
 
 export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
@@ -27,7 +30,9 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
   currentClass,
   allStudents = [],
   students = [],
-  onOpenWhatsApp
+  onOpenWhatsApp,
+  currentUser,
+  timetable
 }) => {
   const [filterThreshold, setFilterThreshold] = useState<'all' | 'defaulters' | 'stars'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -37,12 +42,18 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
 
   const rawStudents = allStudents.length > 0 ? allStudents : students;
 
-  // Filter sessions strictly for the current class
+  // Filter sessions strictly for the current class and logged-in teacher (if applicable)
   const classSessions = useMemo(() => {
     return sessions
       .filter(s => s.classId === currentClass.id)
+      .filter(s => {
+        if (currentUser?.role === 'teacher') {
+          return isSessionBelongsToTeacher(s, currentUser, timetable);
+        }
+        return true;
+      })
       .sort((a, b) => a.date.localeCompare(b.date));
-  }, [sessions, currentClass.id]);
+  }, [sessions, currentClass.id, currentUser, timetable]);
 
   // Students belonging to current class
   const classStudents = useMemo(() => {
@@ -214,13 +225,18 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       {/* Top Banner with WhatsApp Export */}
       <div className="bg-white p-3.5 sm:p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3.5">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-base sm:text-lg font-bold text-slate-900">
               Attendance Analytics & Reports
             </h2>
             <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-800">
               {currentClass.name}
             </span>
+            {currentUser?.role === 'teacher' && (
+              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                Faculty: {currentUser.name}
+              </span>
+            )}
           </div>
           <p className="text-xs text-slate-500 mt-1">
             Track student attendance patterns, identify students requiring attention, and export records directly to WhatsApp.
