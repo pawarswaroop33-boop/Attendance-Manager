@@ -1,10 +1,10 @@
 import { ClassGroup, Student, AttendanceSession, Teacher, Classroom, TimetableSlot, SystemSettings } from '../types';
 
 export const INITIAL_SETTINGS: SystemSettings = {
-  collegeName: 'D.Y.PATIL TECHNICAL CAMPUS',
-  departmentName: 'Department of Electronics and Computer Engineering',
-  hodName: 'Dr. S. K. Patil (HOD)',
-  hodPasscode: 'DYP-HOD-2026',
+  collegeName: 'D.Y.PATIL TECHNCIAL CAMPUS',
+  departmentName: 'Department Of Electronics and Computer Engineering',
+  hodName: 'dyp',
+  hodPasscode: 'dyp123',
   defaulterThreshold: 50, // Criteria set to 50% by default
   cloudSyncStatus: 'synced',
   lastCloudSyncTimestamp: new Date().toISOString(),

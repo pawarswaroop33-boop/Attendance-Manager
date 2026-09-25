@@ -31,6 +31,7 @@ import { TimetableLectureSelector } from './components/TimetableLectureSelector'
 import { HodControlCenter } from './components/HodControlCenter';
 import { ImportStudentsModal } from './components/ImportStudentsModal';
 import { WhatsAppShareModal } from './components/WhatsAppShareModal';
+import { BiometricEnrollModal } from './components/BiometricEnrollModal';
 import { getDayOfWeek } from './utils/dateUtils';
 import { 
   isSlotBelongsToTeacher, 
@@ -59,23 +60,33 @@ export default function App() {
     return `${yyyy}-${mm}-${dd}`;
   };
 
-  // 1. Authenticated User (Null implies show Login Page)
-  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
+  // 1. Authenticated User: Always starts as null so opening the app link always opens the Login Page
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+
+  // Security Policy: Clear any legacy auth tokens on load to guarantee fresh login
+  useEffect(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY_AUTH);
-      if (saved) return JSON.parse(saved);
-    } catch (e) {
-      console.error('Failed to load auth user', e);
-    }
-    // Default: show login page so user immediately sees the D.Y.PATIL login page
-    return null;
-  });
+      localStorage.removeItem(STORAGE_KEY_AUTH);
+      sessionStorage.removeItem(STORAGE_KEY_AUTH);
+    } catch (_) {}
+  }, []);
 
   // 2. Campus & System Settings
   const [settings, setSettings] = useState<SystemSettings>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_SETTINGS);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return {
+          ...parsed,
+          collegeName: 'D.Y.PATIL TECHNCIAL CAMPUS',
+          departmentName: parsed.departmentName?.includes('Electronics')
+            ? 'Department Of Electronics and Computer Engineering'
+            : (parsed.departmentName || 'Department Of Electronics and Computer Engineering'),
+          hodName: (parsed.hodName === 'Dr. S. K. Patil (HOD)' || !parsed.hodName) ? 'dyp' : parsed.hodName,
+          hodPasscode: (parsed.hodPasscode === 'DYP-HOD-2026' || !parsed.hodPasscode) ? 'dyp123' : parsed.hodPasscode
+        };
+      }
     } catch (e) {
       console.error('Failed to load settings', e);
     }
@@ -215,6 +226,7 @@ export default function App() {
   // Modals & Synchronization States
   const [isWhatsAppModalOpen, setIsWhatsAppModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [isBiometricEnrollOpen, setIsBiometricEnrollOpen] = useState(false);
   const [savedIndicator, setSavedIndicator] = useState(true);
   const [cloudSyncing, setCloudSyncing] = useState(false);
   const [isDbReady, setIsDbReady] = useState(false);
@@ -250,6 +262,8 @@ export default function App() {
     setCurrentUser(null);
     setCurrentTab('dashboard');
     try {
+      localStorage.removeItem(STORAGE_KEY_AUTH);
+      sessionStorage.clear();
       window.history.replaceState({ screen: 'login' }, '');
     } catch (_) {}
   };
@@ -378,18 +392,6 @@ export default function App() {
   }, []);
 
   // Persistence to LocalStorage (Instant offline-first resilience, no circular loops)
-  useEffect(() => {
-    try {
-      if (currentUser) {
-        localStorage.setItem(STORAGE_KEY_AUTH, JSON.stringify(currentUser));
-      } else {
-        localStorage.removeItem(STORAGE_KEY_AUTH);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  }, [currentUser]);
-
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(settings));
@@ -1272,6 +1274,7 @@ export default function App() {
         onDateChange={setSelectedDate}
         onOpenWhatsApp={handleOpenWhatsAppModal}
         onOpenImportModal={handleOpenImportModal}
+        onOpenBiometrics={() => setIsBiometricEnrollOpen(true)}
         savedIndicator={savedIndicator}
         totalPresent={totalPresentCount}
         totalStudents={currentClass.studentIds.length}
@@ -1511,6 +1514,15 @@ export default function App() {
         currentClass={currentClass}
         students={students}
       />
+
+      {/* MODAL 3: HARDWARE BIOMETRIC ENROLLMENT */}
+      {currentUser && (
+        <BiometricEnrollModal
+          isOpen={isBiometricEnrollOpen}
+          onClose={() => setIsBiometricEnrollOpen(false)}
+          currentUser={currentUser}
+        />
+      )}
 
       {/* Footer */}
       <footer className="bg-white border-t border-slate-200 py-3.5 px-4 text-center text-xs text-slate-500">

@@ -12,9 +12,12 @@ import {
   Cloud, 
   GraduationCap, 
   Sparkles,
-  ClipboardList
+  ClipboardList,
+  Fingerprint
 } from 'lucide-react';
 import { ClassGroup, AuthUser, SystemSettings } from '../types';
+import { DYPatilLogo } from './DYPatilLogo';
+import { biometricService } from '../services/biometricService';
 
 export type AppTab = 'dashboard' | 'timetable' | 'defaulters' | 'analytics' | 'students' | 'hod';
 
@@ -28,6 +31,7 @@ interface HeaderProps {
   onDateChange: (date: string) => void;
   onOpenWhatsApp: () => void;
   onOpenImportModal: () => void;
+  onOpenBiometrics?: () => void;
   savedIndicator: boolean;
   totalPresent: number;
   totalStudents: number;
@@ -50,6 +54,7 @@ export const Header: React.FC<HeaderProps> = ({
   selectedDate,
   onDateChange,
   onOpenImportModal,
+  onOpenBiometrics,
   savedIndicator,
   totalPresent,
   totalStudents,
@@ -63,6 +68,7 @@ export const Header: React.FC<HeaderProps> = ({
   activeDbProvider = 'Supabase'
 }) => {
   const currentClass = classes.find(c => c.id === selectedClassId) || classes[0];
+  const isBiometricEnrolled = biometricService.isUserEnrolled(currentUser.uniqueCode || currentUser.id);
 
   const handleSetToday = () => {
     const today = new Date();
@@ -83,10 +89,8 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="py-2 sm:py-3 flex items-center justify-between gap-2">
           
           {/* Brand / Campus Identity */}
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-slate-900 text-white flex items-center justify-center shrink-0 shadow-xs">
-              <GraduationCap className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400" />
-            </div>
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+            <DYPatilLogo variant="emblem" className="w-8 h-9 sm:w-9 sm:h-10 shrink-0 drop-shadow-xs" />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5 flex-wrap">
                 <h1 className="text-xs sm:text-sm font-bold text-slate-900 truncate leading-tight">
@@ -99,6 +103,21 @@ export const Header: React.FC<HeaderProps> = ({
                 }`}>
                   {currentUser.role === 'hod' ? 'HOD' : currentUser.uniqueCode || 'Faculty'}
                 </span>
+                {onOpenBiometrics && (
+                  <button
+                    type="button"
+                    onClick={onOpenBiometrics}
+                    className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md border transition-all cursor-pointer select-none active:scale-95 ${
+                      isBiometricEnrolled
+                        ? 'bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100'
+                        : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
+                    }`}
+                    title="Click to manage personal hardware biometrics"
+                  >
+                    <Fingerprint className="w-3 h-3 text-sky-600" />
+                    <span>{isBiometricEnrolled ? 'Biometric Active' : 'Enroll Fingerprint'}</span>
+                  </button>
+                )}
               </div>
               <p className="text-[11px] text-slate-500 truncate leading-tight">
                 {currentUser.name} &bull; {settings.departmentName}
@@ -306,6 +325,24 @@ export const Header: React.FC<HeaderProps> = ({
             <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
             <span>Scan List</span>
           </button>
+
+          {onOpenBiometrics && (
+            <button
+              id="tab-biometric-manage"
+              type="button"
+              onClick={onOpenBiometrics}
+              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap cursor-pointer shrink-0 min-h-[38px] border active:scale-95 ${
+                isBiometricEnrolled
+                  ? 'text-sky-800 bg-sky-50 hover:bg-sky-100 border-sky-200'
+                  : 'text-amber-800 bg-amber-50 hover:bg-amber-100 border-amber-300'
+              }`}
+              title="Enroll or manage your personal hardware fingerprint"
+            >
+              <Fingerprint className="w-3.5 h-3.5 text-sky-600" />
+              <span>Biometric ID</span>
+              <span className={`w-2 h-2 rounded-full ${isBiometricEnrolled ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`} />
+            </button>
+          )}
 
         </nav>
 

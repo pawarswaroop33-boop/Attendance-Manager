@@ -1,0 +1,79 @@
+<svg viewBox="0 0 360 490" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="svgTextArc" d="M 65,115 C 105,65 255,65 295,115" fill="none" />
+    <linearGradient id="shieldNavyGrad" x1="180" y1="20" x2="180" y2="390" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stopColor="#0B2A59" />
+      <stop offset="50%" stopColor="#082247" />
+      <stop offset="100%" stopColor="#04142B" />
+    </linearGradient>
+    <linearGradient id="shieldGoldGrad" x1="40" y1="20" x2="320" y2="390" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stopColor="#FBBF24" />
+      <stop offset="50%" stopColor="#F59E0B" />
+      <stop offset="100%" stopColor="#D97706" />
+    </linearGradient>
+    <radialGradient id="sunRedGrad" cx="180" cy="300" r="70" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stopColor="#EF4444" />
+      <stop offset="70%" stopColor="#DC2626" />
+      <stop offset="100%" stopColor="#991B1B" />
+    </radialGradient>
+  </defs>
+
+  <!-- Gold Border Shield -->
+  <path d="M 180 22 C 238 22, 278 40, 314 74 C 319 158, 309 252, 180 384 C 51 252, 41 158, 46 74 C 82 40, 122 22, 180 22 Z" fill="url(#shieldGoldGrad)" />
+  <!-- Navy Interior -->
+  <path d="M 180 34 C 232 34, 269 49, 302 80 C 306 156, 296 242, 180 366 C 64 242, 54 156, 58 80 C 91 49, 128 34, 180 34 Z" fill="url(#shieldNavyGrad)" stroke="#EAB308" stroke-width="3.5" />
+
+  <!-- Arched Motto -->
+  <text font-family="system-ui, -apple-system, sans-serif" font-weight="800" font-size="18" letter-spacing="2.2">
+    <textPath href="#svgTextArc" startOffset="50%" text-anchor="middle" fill="#FFFFFF">
+      Education Is Power
+    </textPath>
+  </text>
+
+  <!-- Red Sun -->
+  <path d="M 115 300 C 115 250, 245 250, 245 300 Z" fill="url(#sunRedGrad)" />
+
+  <!-- Tree Foliage -->
+  <g>
+    <path d="M 180 75 C 172 88, 172 102, 180 114 C 188 102, 188 88, 180 75 Z" fill="#65A30D" />
+    <path d="M 166 84 C 156 94, 158 108, 168 116 C 174 106, 174 92, 166 84 Z" fill="#84CC16" />
+    <path d="M 194 84 C 204 94, 202 108, 192 116 C 186 106, 186 92, 194 84 Z" fill="#15803D" />
+    <path d="M 148 98 C 136 108, 140 122, 152 128 C 158 116, 156 104, 148 98 Z" fill="#4D7C0F" />
+    <path d="M 212 98 C 224 108, 220 122, 208 128 C 202 116, 204 104, 212 98 Z" fill="#84CC16" />
+    <path d="M 172 112 C 162 122, 164 136, 174 142 C 180 132, 180 118, 172 112 Z" fill="#65A30D" />
+    <path d="M 188 112 C 198 122, 196 136, 186 142 C 180 132, 180 118, 188 112 Z" fill="#16A34A" />
+    <path d="M 130 116 C 116 126, 120 142, 134 146 C 142 134, 140 122, 130 116 Z" fill="#84CC16" />
+    <path d="M 230 116 C 244 126, 240 142, 226 146 C 218 134, 220 122, 230 116 Z" fill="#15803D" />
+    <path d="M 154 130 C 142 140, 146 154, 158 158 C 166 146, 164 136, 154 130 Z" fill="#65A30D" />
+    <path d="M 206 130 C 218 140, 214 154, 202 158 C 194 146, 196 136, 206 130 Z" fill="#84CC16" />
+    <path d="M 112 138 C 98 148, 104 164, 118 168 C 126 156, 124 144, 112 138 Z" fill="#4D7C0F" />
+    <path d="M 248 138 C 262 148, 256 164, 242 168 C 234 156, 236 144, 248 138 Z" fill="#65A30D" />
+    <path d="M 136 152 C 122 162, 128 176, 142 178 C 148 166, 148 156, 136 152 Z" fill="#84CC16" />
+    <path d="M 224 152 C 238 162, 232 176, 218 178 C 212 166, 212 156, 224 152 Z" fill="#16A34A" />
+    <path d="M 100 162 C 86 172, 92 188, 106 190 C 114 178, 112 168, 100 162 Z" fill="#65A30D" />
+    <path d="M 260 162 C 274 172, 268 188, 254 190 C 246 178, 248 168, 260 162 Z" fill="#84CC16" />
+    <path d="M 120 176 C 106 186, 114 200, 126 202 C 134 190, 132 180, 120 176 Z" fill="#15803D" />
+    <path d="M 240 176 C 254 186, 246 200, 234 202 C 226 190, 228 180, 240 176 Z" fill="#65A30D" />
+    <path d="M 144 192 C 132 202, 140 216, 152 216 C 158 204, 154 196, 144 192 Z" fill="#84CC16" />
+    <path d="M 216 192 C 228 202, 220 216, 208 216 C 202 204, 206 196, 216 192 Z" fill="#16A34A" />
+    <path d="M 166 196 C 156 206, 162 218, 172 218 C 178 208, 174 200, 166 196 Z" fill="#65A30D" />
+    <path d="M 194 196 C 204 206, 198 218, 188 218 C 182 208, 186 200, 194 196 Z" fill="#84CC16" />
+  </g>
+
+  <!-- Fountain Pen Nib Trunk -->
+  <path d="M 180 200 L 150 145 M 180 200 L 210 145 M 180 200 L 180 120 M 180 215 L 130 170 M 180 215 L 230 170 M 180 230 L 115 195 M 180 230 L 245 195" stroke="#FFFFFF" stroke-width="4.5" stroke-linecap="round" />
+  <path d="M 180 140 C 170 180, 164 240, 164 265 C 164 285, 175 315, 180 328 C 185 315, 196 285, 196 265 C 196 240, 190 180, 180 140 Z" fill="#FFFFFF" />
+  <line x1="180" y1="272" x2="180" y2="326" stroke="#DC2626" stroke-width="2.5" stroke-linecap="round" />
+  <circle cx="180" cy="270" r="4" fill="#DC2626" />
+
+  <!-- Typography Below Shield -->
+  <text x="180" y="420" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-weight="900" font-size="28" fill="#0B2545" letter-spacing="-0.5">
+    Dr.D.Y. PATIL
+  </text>
+  <text x="180" y="445" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="14" fill="#0B2545">
+    Academic Education Excellence
+  </text>
+  <text x="180" y="468" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-weight="800" font-size="13" fill="#0B2545" letter-spacing="1.5">
+    FEDERATION
+  </text>
+</svg>
