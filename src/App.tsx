@@ -1352,6 +1352,7 @@ export default function App() {
               }}
               onNavigateToTimetable={() => handleTabChange('timetable')}
               onSelectDate={setSelectedDate}
+              onOpenBiometrics={() => setIsBiometricEnrollOpen(true)}
             />
           </div>
         )}
@@ -1413,8 +1414,9 @@ export default function App() {
             onUpdateStudent={handleUpdateStudent}
             onRemoveStudentFromClass={handleRemoveStudentFromClass}
             onDeleteStudentPermanently={handleDeleteStudentPermanently}
-            onDeleteAllStudents={handleDeleteAllStudents}
-            onOpenImportModal={handleOpenImportModal}
+            onDeleteAllStudents={currentUser?.role === 'hod' ? handleDeleteAllStudents : undefined}
+            onOpenImportModal={currentUser?.role === 'hod' ? handleOpenImportModal : undefined}
+            currentUser={currentUser}
           />
         )}
 
@@ -1425,8 +1427,12 @@ export default function App() {
             onUpdateSettings={(newSettings) => {
               notifyUserChange();
               setSettings(newSettings);
+              if (currentUser.role === 'hod' && newSettings.hodName !== currentUser.name) {
+                setCurrentUser(prev => prev ? { ...prev, name: newSettings.hodName } : null);
+              }
             }}
             onResetSettings={handleResetSettingsOnly}
+            onOpenBiometrics={() => setIsBiometricEnrollOpen(true)}
             teachers={teachers}
             onAddTeacher={(t) => {
               notifyUserChange();

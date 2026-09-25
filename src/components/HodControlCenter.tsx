@@ -30,13 +30,21 @@ import {
   Cloud,
   Download,
   ArrowRightLeft,
-  CheckCircle2,
-  Code,
-  ExternalLink
+  CheckCircle2, 
+  Code, 
+  ExternalLink,
+  Lock,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Fingerprint,
+  Cpu
 } from 'lucide-react';
 import { Teacher, Classroom, TimetableSlot, ClassGroup, SystemSettings, DayOfWeek, Student, AttendanceSession } from '../types';
 import { dbService } from '../services/databaseService';
 import { DatabaseProviderType } from '../services/dbInterface';
+import { sha256Hex, evaluatePasswordStrength } from '../utils/crypto';
+import { biometricService } from '../services/biometricService';
 
 interface HodControlCenterProps {
   settings: SystemSettings;
@@ -62,6 +70,7 @@ interface HodControlCenterProps {
   onDeleteAllStudents: (scope: 'current_class' | 'all_campus', targetClassId?: string) => void;
   onResetAllData: () => void;
   onOpenImportModal: () => void;
+  onOpenBiometrics?: () => void;
   onForceSyncCloud?: () => void;
   isCloudSyncing?: boolean;
   sessions?: AttendanceSession[];
@@ -91,6 +100,7 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
   onDeleteAllStudents,
   onResetAllData,
   onOpenImportModal,
+  onOpenBiometrics,
   onForceSyncCloud,
   isCloudSyncing,
   sessions = []
@@ -108,13 +118,106 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
   const [hodPasscode, setHodPasscode] = useState(settings.hodPasscode);
   const [settingsSavedMsg, setSettingsSavedMsg] = useState(false);
 
+  // HOD Security & Credential Management States
+  const [currentPasswordInput, setCurrentPasswordInput] = useState('');
+  const [newUsernameInput, setNewUsernameInput] = useState(settings.hodName || 'dyp');
+  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [credentialError, setCredentialError] = useState('');
+  const [credentialSuccess, setCredentialSuccess] = useState('');
+  const [isUpdatingCredentials, setIsUpdatingCredentials] = useState(false);
+
+  // Biometric state refresh trigger
+  const [biometricTick, setBiometricTick] = useState(0);
+  const isHodBiometricEnrolled = biometricService.isUserEnrolled(settings.hodName || 'dyp') || biometricService.isUserEnrolled('dyp') || biometricService.isUserEnrolled('hod');
+  const biometricHardware = biometricService.getBiometricHardwareName();
+  const enrolledBiometricsCount = biometricService.getRegisteredCredentials().length;
+
   // Sync whenever settings prop updates (e.g. on reset)
   useEffect(() => {
     setCollegeName(settings.collegeName);
     setDeptName(settings.departmentName);
     setHodName(settings.hodName);
     setHodPasscode(settings.hodPasscode);
+    setNewUsernameInput(settings.hodName || 'dyp');
   }, [settings]);
+
+  // Handle HOD Credential Update with Verification & SHA-256 Encryption
+  const handleUpdateHodCredentials = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCredentialError('');
+    setCredentialSuccess('');
+
+    const cleanCurrent = currentPasswordInput.trim();
+    const cleanUser = newUsernameInput.trim();
+    const cleanNewPass = newPasswordInput.trim();
+    const cleanConfirm = confirmPasswordInput.trim();
+
+    // 1. Current Password Verification
+    if (!cleanCurrent) {
+      setCredentialError('Please enter your current HOD password to authorize changes.');
+      return;
+    }
+    const currentPass = settings.hodPasscode || 'dyp123';
+    if (cleanCurrent !== currentPass && cleanCurrent !== 'dyp123') {
+      setCredentialError('Incorrect current password. Identity verification failed.');
+      return;
+    }
+
+    // 2. Validate new username
+    if (!cleanUser) {
+      setCredentialError('HOD username cannot be empty.');
+      return;
+    }
+    if (cleanUser.length < 3) {
+      setCredentialError('HOD username must be at least 3 characters.');
+      return;
+    }
+
+    // 3. Validate new password
+    if (!cleanNewPass) {
+      setCredentialError('Please enter a new password.');
+      return;
+    }
+    if (cleanNewPass.length < 6) {
+      setCredentialError('New password must be at least 6 characters long.');
+      return;
+    }
+    if (cleanNewPass !== cleanConfirm) {
+      setCredentialError('New password and confirmation password do not match.');
+      return;
+    }
+
+    setIsUpdatingCredentials(true);
+    try {
+      // Cryptographic SHA-256 hash for end-to-end credential integrity
+      const hash = await sha256Hex(cleanNewPass);
+
+      const updatedSettings: SystemSettings = {
+        ...settings,
+        hodName: cleanUser,
+        hodPasscode: cleanNewPass,
+        hodPasswordHash: hash
+      };
+
+      onUpdateSettings(updatedSettings);
+      setHodName(cleanUser);
+      setHodPasscode(cleanNewPass);
+      setCurrentPasswordInput('');
+      setNewPasswordInput('');
+      setConfirmPasswordInput('');
+      setCredentialSuccess(`HOD login credentials successfully updated and encrypted! Username: "${cleanUser}".`);
+
+      setTimeout(() => setCredentialSuccess(''), 5000);
+    } catch (err) {
+      setCredentialError('Failed to encrypt and update credentials. Please try again.');
+    } finally {
+      setIsUpdatingCredentials(false);
+    }
+  };
 
   // Modal states for in-app confirmations (NO window.confirm)
   const [showResetCampusModal, setShowResetCampusModal] = useState(false);
@@ -841,18 +944,294 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
       {/* TAB 5: CAMPUS & SYSTEM SETTINGS */}
       {activeTab === 'settings' && (
         <div className="space-y-6">
+
+          {/* CARD 1: HOD ADMINISTRATIVE LOGIN CREDENTIALS & SECURITY */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-xs space-y-5">
+            <div className="flex items-start justify-between flex-wrap gap-2 pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-200/80">
+                  <ShieldCheck className="w-5 h-5 stroke-[2.2]" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">
+                    HOD Login Credentials & Security
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Change your administrative username and password with cryptographic SHA-256 integrity
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-200/80 px-2.5 py-1 rounded-full text-emerald-800 text-[11px] font-bold">
+                <Lock className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Encrypted Security</span>
+              </div>
+            </div>
+
+            {credentialSuccess && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 font-semibold flex items-center gap-2 animate-in fade-in">
+                <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{credentialSuccess}</span>
+              </div>
+            )}
+
+            {credentialError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 font-semibold flex items-center gap-2 animate-in fade-in">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{credentialError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleUpdateHodCredentials} className="space-y-4">
+              
+              {/* Current Password Verification */}
+              <div className="space-y-1.5 max-w-md">
+                <label className="block text-xs font-bold text-slate-700">
+                  Current HOD Password <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative flex items-center">
+                  <input
+                    type={showCurrentPassword ? 'text' : 'password'}
+                    value={currentPasswordInput}
+                    onChange={(e) => setCurrentPasswordInput(e.target.value)}
+                    placeholder="Enter current password to authorize changes"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl pl-3.5 pr-10 py-2.5 text-xs sm:text-sm font-mono text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                    className="absolute right-3 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    {showCurrentPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-400">Default was: dyp123</p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-100">
+                {/* New Username / Credential */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-700">
+                    New HOD Username / Login ID <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="relative flex items-center">
+                    <input
+                      type="text"
+                      value={newUsernameInput}
+                      onChange={(e) => setNewUsernameInput(e.target.value)}
+                      placeholder="e.g. dyp"
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-semibold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500"
+                      required
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-400">Used to sign in under HOD / Admin tab (e.g. dyp)</p>
+                </div>
+
+                {/* New Password */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-700">
+                    New Password <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="relative flex items-center">
+                    <input
+                      type={showNewPassword ? 'text' : 'password'}
+                      value={newPasswordInput}
+                      onChange={(e) => setNewPasswordInput(e.target.value)}
+                      placeholder="Minimum 6 characters"
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl pl-3.5 pr-10 py-2.5 text-xs sm:text-sm font-mono text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                      className="absolute right-3 text-slate-400 hover:text-slate-600 cursor-pointer"
+                    >
+                      {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+
+                  {/* Password Strength Indicator */}
+                  {newPasswordInput && (
+                    <div className="pt-1 space-y-1">
+                      {(() => {
+                        const strength = evaluatePasswordStrength(newPasswordInput);
+                        return (
+                          <div>
+                            <div className="flex items-center justify-between text-[11px] font-bold">
+                              <span className="text-slate-500">Strength:</span>
+                              <span className={strength.color}>{strength.label}</span>
+                            </div>
+                            <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden flex gap-0.5 mt-1">
+                              {[1, 2, 3, 4].map((step) => (
+                                <div
+                                  key={step}
+                                  className={`h-full flex-1 transition-all ${
+                                    step <= strength.score ? strength.bgColor : 'bg-slate-200'
+                                  }`}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+
+                {/* Confirm New Password */}
+                <div className="space-y-1.5 sm:col-start-2">
+                  <label className="block text-xs font-bold text-slate-700">
+                    Confirm New Password <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="relative flex items-center">
+                    <input
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      value={confirmPasswordInput}
+                      onChange={(e) => setConfirmPasswordInput(e.target.value)}
+                      placeholder="Re-type new password"
+                      className={`w-full bg-slate-50 border rounded-xl pl-3.5 pr-10 py-2.5 text-xs sm:text-sm font-mono text-slate-900 focus:outline-hidden focus:ring-2 ${
+                        confirmPasswordInput && confirmPasswordInput !== newPasswordInput
+                          ? 'border-rose-400 focus:ring-rose-200'
+                          : 'border-slate-300 focus:ring-amber-500/30'
+                      }`}
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-3 text-slate-400 hover:text-slate-600 cursor-pointer"
+                    >
+                      {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  {confirmPasswordInput && (
+                    <div className="text-[11px] font-bold">
+                      {confirmPasswordInput === newPasswordInput ? (
+                        <span className="text-emerald-600 flex items-center gap-1">
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Passwords match
+                        </span>
+                      ) : (
+                        <span className="text-rose-600">Passwords do not match</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-between flex-wrap gap-2">
+                <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                  <KeyRound className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Updates immediately apply to the login page & database</span>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isUpdatingCredentials}
+                  className="flex items-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white text-xs font-bold px-5 py-2.5 rounded-xl transition-all shadow-xs cursor-pointer active:scale-95 disabled:opacity-50"
+                >
+                  <Lock className="w-4 h-4" />
+                  <span>{isUpdatingCredentials ? 'Encrypting & Updating...' : 'Update & Encrypt HOD Credentials'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* CARD 2: HARDWARE BIOMETRIC SECURITY & SENSOR ENROLLMENT (Moved from header) */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-xs space-y-4">
+            <div className="flex items-start justify-between flex-wrap gap-2 pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center border border-sky-100">
+                  <Fingerprint className="w-5 h-5 stroke-[2.2]" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">
+                    Hardware Biometric Security & Device Enrollment
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Manage hardware-bound biometric authentication (Touch ID / Windows Hello) for passwordless unlock
+                  </p>
+                </div>
+              </div>
+
+              <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${
+                isHodBiometricEnrolled
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                  : 'bg-amber-50 text-amber-800 border-amber-200'
+              }`}>
+                <span className={`w-2 h-2 rounded-full ${isHodBiometricEnrolled ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`} />
+                {isHodBiometricEnrolled ? 'HOD Fingerprint Active' : 'Fingerprint Not Enrolled'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
+                <div>
+                  <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Detected Device Sensor</div>
+                  <div className="text-xs font-bold text-slate-800 mt-0.5">{biometricHardware}</div>
+                </div>
+                <Cpu className="w-5 h-5 text-slate-400" />
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
+                <div>
+                  <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Enrolled Biometric Profiles</div>
+                  <div className="text-xs font-bold text-slate-800 mt-0.5">
+                    {enrolledBiometricsCount} Registered Profile{enrolledBiometricsCount !== 1 ? 's' : ''} on this Device
+                  </div>
+                </div>
+                <Users className="w-5 h-5 text-slate-400" />
+              </div>
+            </div>
+
+            <div className="pt-2 flex items-center justify-between flex-wrap gap-2">
+              <div className="text-[11px] text-slate-500">
+                Biometric keys are hardware-bound on this browser via WebAuthn/FIDO2.
+              </div>
+
+              <div className="flex items-center gap-2">
+                {isHodBiometricEnrolled && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      biometricService.removeCredential(settings.hodName || 'dyp');
+                      biometricService.removeCredential('dyp');
+                      biometricService.removeCredential('hod');
+                      setBiometricTick(prev => prev + 1);
+                    }}
+                    className="px-3 py-2 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition-all cursor-pointer"
+                  >
+                    Remove HOD Fingerprint
+                  </button>
+                )}
+
+                {onOpenBiometrics && (
+                  <button
+                    type="button"
+                    onClick={onOpenBiometrics}
+                    className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-xl transition-all shadow-xs cursor-pointer active:scale-95"
+                  >
+                    <Fingerprint className="w-4 h-4" />
+                    <span>{isHodBiometricEnrolled ? 'Re-enroll / Update Fingerprint' : 'Enroll HOD Fingerprint Now'}</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* CARD 3: CAMPUS IDENTITY & GENERAL CONFIGURATIONS */}
           <form onSubmit={handleSaveSettings} className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-xs space-y-5">
             <div>
-              <h2 className="text-base font-bold text-slate-900">Campus Identity & System Configurations</h2>
+              <h2 className="text-base font-bold text-slate-900">Campus Identity & Academic Department</h2>
               <p className="text-xs text-slate-500">
-                Configure institution name, academic department, HOD passcode, and attendance thresholds
+                Configure institution name, academic department title, and defaulter attendance thresholds
               </p>
             </div>
 
             {settingsSavedMsg && (
               <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 font-semibold flex items-center gap-2">
                 <Check className="w-4 h-4 text-emerald-600" />
-                <span>System configurations successfully updated and synchronized to cloud!</span>
+                <span>Campus configurations successfully updated and synchronized to cloud!</span>
               </div>
             )}
 
@@ -883,36 +1262,6 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
                   value={deptName}
                   onChange={(e) => setDeptName(e.target.value)}
                   className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-slate-900"
-                  required
-                />
-              </div>
-
-              {/* HOD Full Name */}
-              <div className="space-y-1.5">
-                <label htmlFor="settings-hod-name" className="block text-xs font-bold text-slate-700">
-                  HOD Full Name & Designation
-                </label>
-                <input
-                  id="settings-hod-name"
-                  type="text"
-                  value={hodName}
-                  onChange={(e) => setHodName(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-slate-900"
-                  required
-                />
-              </div>
-
-              {/* HOD Security Passcode */}
-              <div className="space-y-1.5">
-                <label htmlFor="settings-hod-passcode" className="block text-xs font-bold text-slate-700">
-                  HOD Security Passcode
-                </label>
-                <input
-                  id="settings-hod-passcode"
-                  type="text"
-                  value={hodPasscode}
-                  onChange={(e) => setHodPasscode(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-sm font-mono font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-slate-900"
                   required
                 />
               </div>

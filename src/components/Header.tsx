@@ -103,21 +103,6 @@ export const Header: React.FC<HeaderProps> = ({
                 }`}>
                   {currentUser.role === 'hod' ? 'HOD' : currentUser.uniqueCode || 'Faculty'}
                 </span>
-                {onOpenBiometrics && (
-                  <button
-                    type="button"
-                    onClick={onOpenBiometrics}
-                    className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md border transition-all cursor-pointer select-none active:scale-95 ${
-                      isBiometricEnrolled
-                        ? 'bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100'
-                        : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
-                    }`}
-                    title="Click to manage personal hardware biometrics"
-                  >
-                    <Fingerprint className="w-3 h-3 text-sky-600" />
-                    <span>{isBiometricEnrolled ? 'Biometric Active' : 'Enroll Fingerprint'}</span>
-                  </button>
-                )}
               </div>
               <p className="text-[11px] text-slate-500 truncate leading-tight">
                 {currentUser.name} &bull; {settings.departmentName}
@@ -315,35 +300,18 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
-          <button
-            id="open-scanner-button"
-            type="button"
-            onClick={onOpenImportModal}
-            className="flex items-center gap-1 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-3 py-2 rounded-xl transition-colors cursor-pointer shrink-0 min-h-[38px]"
-            title="Import Excel or PDF student roster"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Scan List</span>
-          </button>
-
-          {onOpenBiometrics && (
+          {currentUser.role === 'hod' && (
             <button
-              id="tab-biometric-manage"
+              id="open-scanner-button"
               type="button"
-              onClick={onOpenBiometrics}
-              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap cursor-pointer shrink-0 min-h-[38px] border active:scale-95 ${
-                isBiometricEnrolled
-                  ? 'text-sky-800 bg-sky-50 hover:bg-sky-100 border-sky-200'
-                  : 'text-amber-800 bg-amber-50 hover:bg-amber-100 border-amber-300'
-              }`}
-              title="Enroll or manage your personal hardware fingerprint"
+              onClick={onOpenImportModal}
+              className="flex items-center gap-1 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-3 py-2 rounded-xl transition-colors cursor-pointer shrink-0 min-h-[38px]"
+              title="Import Excel or PDF student roster"
             >
-              <Fingerprint className="w-3.5 h-3.5 text-sky-600" />
-              <span>Biometric ID</span>
-              <span className={`w-2 h-2 rounded-full ${isBiometricEnrolled ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`} />
+              <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Scan List</span>
             </button>
           )}
-
         </nav>
 
       </div>

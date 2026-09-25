@@ -74,24 +74,30 @@ export function generateWhatsAppMessage(
     message += `\n`;
   }
 
-  if (config.includeAbsentList && absentList.length > 0) {
-    message += `❌ *ABSENT STUDENTS (${absentCount}):*\n`;
-    absentList.forEach((item, index) => {
-      const noteStr = item.note ? ` _(${item.note})_` : '';
-      message += `${index + 1}. Roll #${item.student.rollNo} - *${item.student.name}*${noteStr}\n`;
+  const sortRolls = (rolls: string[]) => {
+    return [...rolls].sort((a, b) => {
+      const numA = parseInt(a.replace(/\D/g, ''), 10);
+      const numB = parseInt(b.replace(/\D/g, ''), 10);
+      if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+      return a.localeCompare(b, undefined, { numeric: true });
     });
-    message += `\n`;
+  };
+
+  if (config.includeAbsentList && absentList.length > 0) {
+    const absentRolls = sortRolls(absentList.map(item => item.student.rollNo)).join(', ');
+    message += `❌ *Absent Roll Nos (${absentCount}):*\n${absentRolls}\n\n`;
   } else if (config.includeAbsentList && absentList.length === 0) {
     message += `🎉 *100% ATTENDANCE TODAY! No absentees.*\n\n`;
   }
 
+  if (presentList.length > 0) {
+    const presentRolls = sortRolls(presentList.map(st => st.rollNo)).join(', ');
+    message += `✅ *Present Roll Nos (${presentCount}):*\n${presentRolls}\n\n`;
+  }
+
   if (config.includeLateList && lateList.length > 0) {
-    message += `⏰ *LATE ARRIVALS (${lateCount}):*\n`;
-    lateList.forEach((item, index) => {
-      const noteStr = item.note ? ` _(${item.note})_` : '';
-      message += `${index + 1}. Roll #${item.student.rollNo} - *${item.student.name}*${noteStr}\n`;
-    });
-    message += `\n`;
+    const lateRolls = sortRolls(lateList.map(item => item.student.rollNo)).join(', ');
+    message += `⏰ *Late Roll Nos (${lateCount}):*\n${lateRolls}\n\n`;
   }
 
   if (config.includeRemarks && (config.customNote || session.remarks)) {

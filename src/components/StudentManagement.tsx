@@ -11,7 +11,7 @@ import {
   AlertTriangle,
   Sparkles
 } from 'lucide-react';
-import { ClassGroup, Student } from '../types';
+import { ClassGroup, Student, AuthUser } from '../types';
 
 interface StudentManagementProps {
   currentClass: ClassGroup;
@@ -22,6 +22,7 @@ interface StudentManagementProps {
   onDeleteStudentPermanently?: (studentId: string) => void;
   onDeleteAllStudents?: (scope: 'current_class' | 'all_campus', targetClassId?: string) => void;
   onOpenImportModal?: () => void;
+  currentUser?: AuthUser;
 }
 
 export const StudentManagement: React.FC<StudentManagementProps> = ({
@@ -32,8 +33,10 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
   onRemoveStudentFromClass,
   onDeleteStudentPermanently,
   onDeleteAllStudents,
-  onOpenImportModal
+  onOpenImportModal,
+  currentUser
 }) => {
+  const isHod = currentUser?.role === 'hod';
   const [search, setSearch] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
@@ -167,7 +170,7 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
         </div>
 
         <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 w-full sm:w-auto">
-          {onOpenImportModal && (
+          {isHod && onOpenImportModal && (
             <button
               id="import-modal-trigger-btn"
               type="button"
@@ -190,8 +193,8 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
             <span>Add Student</span>
           </button>
 
-          {/* Delete All Students Button */}
-          {classStudents.length > 0 && (
+          {/* Delete All Students Button - Strictly HOD only */}
+          {isHod && classStudents.length > 0 && onDeleteAllStudents && (
             <button
               id="delete-all-students-btn"
               type="button"

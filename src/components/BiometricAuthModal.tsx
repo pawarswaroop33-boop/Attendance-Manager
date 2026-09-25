@@ -241,31 +241,27 @@ export const BiometricAuthModal: React.FC<BiometricAuthModalProps> = ({
           /* State 2 & 3: SCANNING / UNAUTHORIZED / SUCCESS */
           <div className="my-4 flex flex-col items-center justify-center">
             
-            {/* Sensor Scanner Circle */}
+            {/* Sensor Scanner Circle - Simple, clean native design */}
             <button
               type="button"
               onClick={handleHardwareBiometricScan}
               disabled={scanState === 'scanning' || scanState === 'success'}
-              className={`relative w-28 h-28 rounded-full flex items-center justify-center transition-all duration-300 cursor-pointer select-none ${
+              className={`relative w-24 h-24 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer select-none ${
                 scanState === 'scanning'
-                  ? 'bg-sky-50 ring-8 ring-sky-100 scale-105'
+                  ? 'bg-sky-50 ring-4 ring-sky-100'
                   : scanState === 'success'
-                  ? 'bg-emerald-50 ring-8 ring-emerald-100 scale-105'
+                  ? 'bg-emerald-50 ring-4 ring-emerald-100'
                   : scanState === 'unauthorized'
-                  ? 'bg-rose-50 ring-8 ring-rose-100 scale-95'
-                  : 'bg-slate-100 hover:bg-sky-50 hover:ring-4 hover:ring-sky-100 active:scale-95'
+                  ? 'bg-rose-50 ring-4 ring-rose-100'
+                  : 'bg-slate-100 hover:bg-sky-50 hover:ring-2 hover:ring-sky-100 active:scale-95'
               }`}
             >
-              {scanState === 'scanning' && (
-                <div className="absolute inset-x-4 top-1/4 h-0.5 bg-gradient-to-r from-transparent via-sky-500 to-transparent shadow-[0_0_8px_rgba(14,165,233,1)] animate-bounce" />
-              )}
-
               {scanState === 'success' ? (
-                <CheckCircle2 className="w-14 h-14 text-emerald-600 animate-in zoom-in-75 duration-300" />
+                <CheckCircle2 className="w-12 h-12 text-emerald-600 animate-in zoom-in-75 duration-200" />
               ) : scanState === 'unauthorized' ? (
-                <ShieldAlert className="w-14 h-14 text-rose-600 animate-in shake duration-300" />
+                <ShieldAlert className="w-12 h-12 text-rose-600 animate-in zoom-in-75 duration-200" />
               ) : (
-                <Fingerprint className={`w-14 h-14 transition-colors duration-200 ${
+                <Fingerprint className={`w-12 h-12 transition-colors duration-200 ${
                   scanState === 'scanning' ? 'text-sky-600 animate-pulse' : 'text-slate-600'
                 }`} />
               )}

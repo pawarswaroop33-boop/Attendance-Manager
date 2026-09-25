@@ -102,6 +102,7 @@ export interface SystemSettings {
   departmentName: string; // "Computer Engineering & Technology"
   hodName: string; // "Dr. S. K. Patil (HOD)"
   hodPasscode: string; // "DYP-HOD-2026"
+  hodPasswordHash?: string; // Cryptographic SHA-256 integrity hash
   defaulterThreshold: number; // e.g. 50 (percentage)
   cloudSyncStatus: 'synced' | 'syncing' | 'offline';
   lastCloudSyncTimestamp: string;

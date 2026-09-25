@@ -174,25 +174,21 @@ export const BiometricEnrollModal: React.FC<BiometricEnrollModalProps> = ({
           </div>
         </div>
 
-        {/* Center Scanner Area */}
+        {/* Center Scanner Area - Simple, clean native design */}
         <div className="my-4 flex flex-col items-center justify-center text-center">
-          <div className={`relative w-28 h-28 rounded-full flex items-center justify-center transition-all duration-300 ${
+          <div className={`relative w-24 h-24 rounded-full flex items-center justify-center transition-all duration-200 ${
             enrollState === 'scanning' || enrollState === 'testing'
-              ? 'bg-sky-50 ring-8 ring-sky-100 scale-105'
+              ? 'bg-sky-50 ring-4 ring-sky-100'
               : enrollState === 'success' || enrollState === 'test-success'
-              ? 'bg-emerald-50 ring-8 ring-emerald-100 scale-105'
+              ? 'bg-emerald-50 ring-4 ring-emerald-100'
               : enrolledCred
-              ? 'bg-emerald-50/60 ring-4 ring-emerald-100'
+              ? 'bg-emerald-50/60 ring-2 ring-emerald-100'
               : 'bg-slate-100'
           }`}>
-            {(enrollState === 'scanning' || enrollState === 'testing') && (
-              <div className="absolute inset-x-4 top-1/4 h-0.5 bg-gradient-to-r from-transparent via-sky-500 to-transparent shadow-[0_0_8px_rgba(14,165,233,1)] animate-bounce" />
-            )}
-
             {enrollState === 'success' || enrollState === 'test-success' ? (
-              <CheckCircle2 className="w-14 h-14 text-emerald-600 animate-in zoom-in-75 duration-300" />
+              <CheckCircle2 className="w-12 h-12 text-emerald-600 animate-in zoom-in-75 duration-200" />
             ) : (
-              <Fingerprint className={`w-14 h-14 transition-colors duration-200 ${
+              <Fingerprint className={`w-12 h-12 transition-colors duration-200 ${
                 enrollState === 'scanning' || enrollState === 'testing'
                   ? 'text-sky-600 animate-pulse'
                   : enrolledCred

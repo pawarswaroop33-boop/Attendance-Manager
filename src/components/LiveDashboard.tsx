@@ -26,13 +26,17 @@ import {
   MapPin,
   Calendar as CalendarIcon,
   User,
-  GraduationCap
+  GraduationCap,
+  Fingerprint,
+  Hash,
+  Send
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { AttendanceSession, ClassGroup, Student, AttendanceStatus, AuthUser, TimetableSlot } from '../types';
 import { generateParentAlertMessage, shareToWhatsApp } from '../utils/whatsapp';
 import { formatDateWithDay, formatDateShort, getDayOfWeek } from '../utils/dateUtils';
 import { getNextLectureDateForUser } from '../utils/teacherFilter';
+import { biometricService } from '../services/biometricService';
 
 interface LiveDashboardProps {
   session: AttendanceSession;
@@ -55,6 +59,7 @@ interface LiveDashboardProps {
   onSelectLectureSlot?: (slotId: string) => void;
   onNavigateToTimetable?: () => void;
   onSelectDate?: (date: string) => void;
+  onOpenBiometrics?: () => void;
 }
 
 export const LiveDashboard: React.FC<LiveDashboardProps> = ({
@@ -77,12 +82,26 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
   activeSlot,
   onSelectLectureSlot,
   onNavigateToTimetable,
-  onSelectDate
+  onSelectDate,
+  onOpenBiometrics
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'present' | 'absent' | 'late' | 'unmarked'>('all');
   const [activeNoteStudentId, setActiveNoteStudentId] = useState<string | null>(null);
   const [noteText, setNoteText] = useState('');
+  const [attendanceMode, setAttendanceMode] = useState<'normal' | 'manual-roll'>('normal');
+  const [manualRollInput, setManualRollInput] = useState('');
+  const [rollFeedback, setRollFeedback] = useState<{ message: string; type: 'success' | 'error'; student?: Student } | null>(null);
+
+  // Check if current faculty has enrolled their biometric on this browser
+  const isTeacherBiometricEnrolled = useMemo(() => {
+    if (!currentUser) return false;
+    return (
+      (currentUser.uniqueCode && biometricService.isUserEnrolled(currentUser.uniqueCode)) ||
+      biometricService.isUserEnrolled(currentUser.id) ||
+      biometricService.isUserEnrolled(currentUser.name)
+    );
+  }, [currentUser]);
 
   const dayOfWeek = getDayOfWeek(selectedDate);
   const nextLectureDate = useMemo(() => {
@@ -203,8 +222,8 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
     }
   };
 
-  const handleSendParentWhatsApp = (student: Student, status: AttendanceStatus, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleSendParentWhatsApp = (student: Student, status: AttendanceStatus, e?: React.MouseEvent) => {
+    e?.stopPropagation();
     const msg = generateParentAlertMessage(student, status, session.date, currentClass);
     shareToWhatsApp(msg, student.parentPhone);
   };
@@ -221,6 +240,171 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
   const handleClearAll = () => {
     setStatusFilter('all');
     onBatchUpdate('unmarked');
+  };
+
+  // Sorted students in numerical roll-number order
+  const sortedClassStudents = useMemo(() => {
+    return [...classStudents].sort((a, b) => {
+      const numA = parseInt(a.rollNo.replace(/\D/g, ''), 10);
+      const numB = parseInt(b.rollNo.replace(/\D/g, ''), 10);
+      if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+      return a.rollNo.localeCompare(b.rollNo, undefined, { numeric: true });
+    });
+  }, [classStudents]);
+
+  // Helper to match student by roll number
+  const findStudentByRoll = (query: string): Student | undefined => {
+    const clean = query.trim().replace(/^#/, '');
+    if (!clean) return undefined;
+    return classStudents.find(s => {
+      const sRoll = s.rollNo.trim().replace(/^#/, '');
+      if (sRoll.toLowerCase() === clean.toLowerCase()) return true;
+      const num1 = parseInt(sRoll, 10);
+      const num2 = parseInt(clean, 10);
+      if (!isNaN(num1) && !isNaN(num2) && num1 === num2) return true;
+      return false;
+    });
+  };
+
+  // Rapid roll number submit handler (supports single, comma-separated, and range e.g. 1-10)
+  const handleMarkRollNumbers = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    const rawTokens = manualRollInput.split(/[\s,;]+/).map(t => t.trim()).filter(Boolean);
+    if (rawTokens.length === 0) return;
+
+    let markedCount = 0;
+    let lastStudent: Student | undefined;
+    const errors: string[] = [];
+
+    // Expand ranges like "1-5" or single tokens
+    const expandedTokens: string[] = [];
+    rawTokens.forEach(tok => {
+      if (tok.includes('-')) {
+        const parts = tok.split('-');
+        const start = parseInt(parts[0], 10);
+        const end = parseInt(parts[1], 10);
+        if (!isNaN(start) && !isNaN(end) && start <= end && end - start < 100) {
+          for (let i = start; i <= end; i++) {
+            expandedTokens.push(String(i));
+          }
+        } else {
+          expandedTokens.push(tok);
+        }
+      } else {
+        expandedTokens.push(tok);
+      }
+    });
+
+    const enteredStudentIds = new Set<string>();
+    expandedTokens.forEach(tok => {
+      const student = findStudentByRoll(tok);
+      if (student) {
+        onUpdateRecord(student.id, 'present');
+        markedCount++;
+        lastStudent = student;
+        enteredStudentIds.add(student.id);
+      } else {
+        errors.push(tok);
+      }
+    });
+
+    // Automatically mark all un-entered students as absent
+    classStudents.forEach(st => {
+      if (!enteredStudentIds.has(st.id) && session.records[st.id]?.status !== 'present') {
+        if (session.records[st.id]?.status !== 'absent') {
+          onUpdateRecord(st.id, 'absent');
+        }
+      }
+    });
+
+    if (markedCount > 0) {
+      if (lastStudent && markedCount === 1) {
+        setRollFeedback({
+          message: `Roll #${lastStudent.rollNo} (${lastStudent.name}) marked Present & saved! (Un-entered students marked Absent)`,
+          type: 'success',
+          student: lastStudent
+        });
+      } else {
+        setRollFeedback({
+          message: `Marked ${markedCount} student(s) as Present & saved! (Un-entered students marked Absent)`,
+          type: 'success',
+          student: lastStudent
+        });
+      }
+      setManualRollInput('');
+
+      if (stats.present + markedCount >= stats.total && stats.total > 0) {
+        confetti({
+          particleCount: 70,
+          spread: 60,
+          origin: { y: 0.7 }
+        });
+      }
+    } else if (errors.length > 0) {
+      setRollFeedback({
+        message: `Roll number(s) not found in ${currentClass.name}: ${errors.join(', ')}`,
+        type: 'error'
+      });
+    }
+  };
+
+  // Switch to Manual Roll mode and automatically mark un-entered students as Absent
+  const handleSwitchToManualRoll = () => {
+    setAttendanceMode('manual-roll');
+    classStudents.forEach(st => {
+      const rec = session.records[st.id];
+      if (!rec || rec.status === 'unmarked') {
+        onUpdateRecord(st.id, 'absent');
+      }
+    });
+  };
+
+  // Toggle roll number from 1-tap chip grid
+  const handleToggleRollChip = (student: Student) => {
+    const currentRec = session.records[student.id];
+    const currentStatus = currentRec?.status || 'absent';
+    const nextStatus: AttendanceStatus = currentStatus === 'present' ? 'absent' : 'present';
+    onUpdateRecord(student.id, nextStatus, currentRec?.note);
+
+    // Ensure all other un-entered students are marked absent automatically
+    classStudents.forEach(st => {
+      if (st.id !== student.id) {
+        const rec = session.records[st.id];
+        if (!rec || rec.status === 'unmarked') {
+          onUpdateRecord(st.id, 'absent');
+        }
+      }
+    });
+
+    if (nextStatus === 'present') {
+      setRollFeedback({
+        message: `Roll #${student.rollNo} (${student.name}) marked Present & saved!`,
+        type: 'success',
+        student
+      });
+    } else {
+      setRollFeedback({
+        message: `Roll #${student.rollNo} (${student.name}) marked Absent & saved!`,
+        type: 'success',
+        student
+      });
+    }
+  };
+
+  // Mark all remaining blank students as Absent
+  const handleMarkRemainingAbsent = () => {
+    let count = 0;
+    classStudents.forEach(st => {
+      const rec = session.records[st.id];
+      if (!rec || rec.status === 'unmarked') {
+        onUpdateRecord(st.id, 'absent');
+        count++;
+      }
+    });
+    setRollFeedback({
+      message: `Marked remaining ${count} unmarked students as Absent & saved!`,
+      type: 'success'
+    });
   };
 
   // =========================================================================
@@ -296,6 +480,18 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                 Jump to Today
               </button>
             )}
+
+            {currentUser?.role === 'teacher' && onOpenBiometrics && (
+              <button
+                type="button"
+                onClick={onOpenBiometrics}
+                className="px-3.5 py-2.5 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
+                title="Manage personal biometric fingerprint"
+              >
+                <Fingerprint className="w-4 h-4 text-sky-600" />
+                <span>{isTeacherBiometricEnrolled ? 'Biometric ID Active' : 'Enroll My Fingerprint'}</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -307,99 +503,123 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
   // ALL STUDENTS ARE BY DEFAULT PRESENT
   // =========================================================================
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <div className="space-y-2 sm:space-y-2.5">
       
       {/* ========================================================================= */}
-      {/* PROMINENT LECTURE TIMING & DETAILS HERO CARD */}
-      {/* Ensures proper lecture and proper timing are clearly visible */}
+      {/* REFINED LECTURE HERO CARD: Light Gradient with Flowing Wave Design */}
       {/* ========================================================================= */}
       {currentLecture && (
-        <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 rounded-2xl p-4 sm:p-5 text-white shadow-md border border-slate-700/80 card-3d">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div className="bg-gradient-to-r from-sky-50 via-white to-blue-50/80 rounded-2xl px-4 py-3.5 sm:py-4 text-slate-800 shadow-xs border border-sky-200/80 relative overflow-hidden">
+          {/* Elegant Multi-layered Wave Accent Design */}
+          <div className="absolute inset-0 pointer-events-none overflow-hidden">
+            <svg
+              className="absolute -bottom-1 left-0 right-0 w-full h-24 opacity-60"
+              viewBox="0 0 1440 120"
+              preserveAspectRatio="none"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="M0,32L48,42.7C96,53,192,75,288,80C384,85,480,75,576,64C672,53,768,43,864,48C960,53,1056,75,1152,80C1248,85,1344,75,1392,69.3L1440,64L1440,120L1392,120C1344,120,1248,120,1152,120C1056,120,960,120,864,120C768,120,672,120,576,120C480,120,384,120,288,120C192,120,96,120,48,120L0,120Z"
+                fill="url(#wave-gradient-1)"
+              />
+              <path
+                d="M0,64L60,58.7C120,53,240,43,360,48C480,53,600,75,720,80C840,85,960,75,1080,64C1200,53,1320,43,1380,37.3L1440,32L1440,120L1380,120C1320,120,1200,120,1080,120C960,120,840,120,720,120C600,120,480,120,360,120C240,120,120,120,60,120L0,120Z"
+                fill="url(#wave-gradient-2)"
+              />
+              <defs>
+                <linearGradient id="wave-gradient-1" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor="#bae6fd" stopOpacity="0.45" />
+                  <stop offset="50%" stopColor="#e0e7ff" stopOpacity="0.55" />
+                  <stop offset="100%" stopColor="#c7d2fe" stopOpacity="0.45" />
+                </linearGradient>
+                <linearGradient id="wave-gradient-2" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor="#e0f2fe" stopOpacity="0.65" />
+                  <stop offset="50%" stopColor="#dbeafe" stopOpacity="0.5" />
+                  <stop offset="100%" stopColor="#ede9fe" stopOpacity="0.55" />
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
+
+          <div className="relative z-10 flex flex-col items-center justify-center text-center space-y-2">
             
-            {/* Left: Timing Pill, Subject, Faculty & Location */}
-            <div className="space-y-2 min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                
-                {/* PROPER TIMING BADGE */}
-                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-500/20 text-sky-300 border border-sky-400/30 text-xs sm:text-sm font-mono font-extrabold shadow-inner">
-                  <Clock className="w-4 h-4 text-sky-400 shrink-0" />
-                  <span>{currentLecture.timeSlotLabel}</span>
-                </span>
+            {/* Top Row Badges: Timing, Date & Day, Live Status (Centered) */}
+            <div className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-2">
+              {/* Timing Badge */}
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/90 backdrop-blur-xs text-sky-800 border border-sky-200 text-xs font-mono font-bold shadow-2xs">
+                <Clock className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                <span>{currentLecture.timeSlotLabel}</span>
+              </span>
 
-                {/* Date & Day Badge */}
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-800 text-slate-300 border border-slate-700 text-xs font-semibold">
-                  <CalendarIcon className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                  <span>{formatDateWithDay(selectedDate, dayOfWeek)}</span>
-                </span>
+              {/* Date & Day Badge */}
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/90 backdrop-blur-xs text-slate-700 border border-slate-200 text-xs font-semibold shadow-2xs">
+                <CalendarIcon className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span>{formatDateWithDay(selectedDate, dayOfWeek)}</span>
+              </span>
 
-                {/* Live Attendance Mode Indicator */}
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[11px] font-extrabold uppercase tracking-wider">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                  <span>Active Lecture</span>
-                </span>
-              </div>
-
-              {/* Lecture Subject Name */}
-              <div className="pt-0.5">
-                <h2 className="text-lg sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">
-                  <BookOpen className="w-5 h-5 sm:w-6 sm:h-6 text-sky-400 shrink-0" />
-                  <span>{currentLecture.subject}</span>
-                </h2>
-              </div>
-
-              {/* Faculty, Room, and Class Group */}
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-300 font-medium pt-0.5">
-                <div className="flex items-center gap-1.5">
-                  <User className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                  <span>Faculty: <strong className="text-white">{currentLecture.teacherName}</strong></span>
-                </div>
-                
-                <span className="text-slate-600 hidden sm:inline">&bull;</span>
-                
-                <div className="flex items-center gap-1.5">
-                  <MapPin className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span>Room: <strong className="text-white">{currentLecture.roomName}</strong></span>
-                </div>
-
-                <span className="text-slate-600 hidden sm:inline">&bull;</span>
-
-                <div className="flex items-center gap-1.5">
-                  <GraduationCap className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                  <span>Class: <strong className="text-white">{currentLecture.className || currentClass.name}</strong></span>
-                </div>
-              </div>
-            </div>
-
-            {/* Right: Quick Live Attendance Status / Multiple Slots Notice */}
-            <div className="flex flex-col sm:flex-row lg:flex-col items-start lg:items-end justify-between gap-2 shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-700/80">
-              <div className="bg-slate-800/90 border border-slate-700 rounded-xl px-3.5 py-2 text-right">
-                <span className="text-[10px] uppercase font-bold text-slate-400 block">Class Roster</span>
-                <span className="text-base font-extrabold text-emerald-400 font-mono">
-                  {stats.present} / {stats.total} Present
-                </span>
-              </div>
-              <span className="text-[11px] text-slate-400 font-medium">
-                Timing: {currentLecture.startTime} to {currentLecture.endTime}
+              {/* Roster Attendance Badge */}
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-300 text-xs font-bold font-mono shadow-2xs">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span>{stats.present}/{stats.total} Present</span>
               </span>
             </div>
 
-          </div>
+            {/* Subject Title (Centered & Prominent) */}
+            <h2 className="text-base sm:text-xl font-black text-slate-900 tracking-tight flex items-center justify-center gap-2">
+              <BookOpen className="w-5 h-5 text-sky-600 shrink-0" />
+              <span>{currentLecture.subject}</span>
+            </h2>
 
-          {/* Multiple Lecture Slots Switcher (if teacher has >1 lecture today) */}
-          {dayLectures.length > 1 && onSelectLectureSlot && (
-            <div className="mt-4 pt-3.5 border-t border-slate-700/80">
-              <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
-                <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-                  <Layers className="w-3.5 h-3.5 text-sky-400" />
-                  <span>Scheduled lectures for you on this day ({dayLectures.length}):</span>
-                </span>
-                <span className="text-[11px] text-slate-400">
-                  Click a slot to switch timing
-                </span>
-              </div>
+            {/* Details Meta Row: Faculty, Room, Class, Biometric (Centered) */}
+            <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-slate-600 font-medium pt-0.5">
+              <span className="flex items-center gap-1">
+                <User className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span>Faculty: <strong className="text-slate-900 font-bold">{currentLecture.teacherName}</strong></span>
+              </span>
 
-              <div className="flex flex-wrap gap-2">
+              <span className="text-slate-300 hidden sm:inline">&bull;</span>
+
+              <span className="flex items-center gap-1">
+                <MapPin className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                <span>Room: <strong className="text-slate-900 font-bold">{currentLecture.roomName}</strong></span>
+              </span>
+
+              <span className="text-slate-300 hidden sm:inline">&bull;</span>
+
+              <span className="flex items-center gap-1">
+                <GraduationCap className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                <span>Class: <strong className="text-slate-900 font-bold">{currentLecture.className || currentClass.name}</strong></span>
+              </span>
+
+              {/* Biometric Button */}
+              {currentUser?.role === 'teacher' && onOpenBiometrics && (
+                <>
+                  <span className="text-slate-300 hidden sm:inline">&bull;</span>
+                  <button
+                    type="button"
+                    onClick={onOpenBiometrics}
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-[11px] font-bold transition-all cursor-pointer select-none active:scale-95 shadow-2xs ${
+                      isTeacherBiometricEnrolled
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                        : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
+                    }`}
+                    title="Biometric Fingerprint Authentication"
+                  >
+                    <Fingerprint className="w-3.5 h-3.5 text-sky-600" />
+                    <span>{isTeacherBiometricEnrolled ? 'Biometric ID Active' : 'Enroll Fingerprint'}</span>
+                  </button>
+                </>
+              )}
+            </div>
+
+            {/* Multiple Lecture Slots Switcher (if teacher has >1 lecture today) */}
+            {dayLectures.length > 1 && onSelectLectureSlot && (
+              <div className="pt-2 mt-1 border-t border-slate-200/80 w-full flex items-center justify-center gap-2 flex-wrap text-xs">
+                <span className="text-slate-500 font-semibold flex items-center gap-1">
+                  <Layers className="w-3.5 h-3.5 text-sky-600" />
+                  <span>Other Slots Today:</span>
+                </span>
                 {dayLectures.map(slot => {
                   const isSelected = (currentLecture?.id === slot.id);
                   return (
@@ -407,214 +627,213 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                       key={slot.id}
                       type="button"
                       onClick={() => onSelectLectureSlot(slot.id)}
-                      className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                      className={`px-3 py-1 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs ${
                         isSelected
-                          ? 'bg-sky-500 text-white shadow-xs ring-2 ring-sky-300'
-                          : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                          ? 'bg-sky-600 text-white shadow-xs font-black'
+                          : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
                       }`}
                     >
-                      <Clock className="w-3.5 h-3.5 text-sky-300" />
                       <span className="font-mono">{slot.timeSlotLabel}</span>
-                      <span className="opacity-50">&bull;</span>
-                      <span className="truncate max-w-[160px]">{slot.subject}</span>
+                      <span className="opacity-40">&bull;</span>
+                      <span className="truncate max-w-[140px]">{slot.subject}</span>
                     </button>
                   );
                 })}
               </div>
-            </div>
-          )}
+            )}
+
+          </div>
         </div>
       )}
 
-      {/* Dynamic Roll Call Guide Banner */}
+      {/* Dynamic Roll Call Guide Banner - Compact & Refined */}
       {stats.unmarked > 0 ? (
-        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 sm:px-4 sm:py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <span className="w-7 h-7 rounded-xl bg-slate-800 text-white flex items-center justify-center shrink-0 shadow-xs">
-              <UserCheck className="w-4 h-4" />
+        <div className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 shadow-2xs">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="w-5 h-5 rounded-md bg-slate-800 text-white flex items-center justify-center shrink-0 text-xs">
+              <UserCheck className="w-3 h-3" />
             </span>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs sm:text-sm font-extrabold text-slate-900">
-                  Attendance Roll Call
-                </span>
-                <span className="text-[10px] font-extrabold px-2 py-0.2 rounded-full bg-amber-100 text-amber-900 border border-amber-200">
-                  {stats.unmarked} of {stats.total} Unmarked
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-600 leading-tight">
-                Tap student row to mark Present, or click Absent/Late. Use &quot;All Present&quot; for instant batch mark or &quot;Clear All&quot; to reset.
-              </p>
-            </div>
+            <span className="text-xs font-bold text-slate-900 truncate">
+              Roll Call:
+            </span>
+            <span className="text-[10px] font-extrabold px-1.5 py-0.2 rounded-full bg-amber-100 text-amber-900 border border-amber-200">
+              {stats.unmarked} of {stats.total} Unmarked
+            </span>
+            <span className="text-[11px] text-slate-500 hidden md:inline truncate">
+              Tap row or enter roll numbers to record attendance.
+            </span>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
-            <button
-              type="button"
-              onClick={handleMarkAllPresentWithFeedback}
-              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold transition-all cursor-pointer shadow-xs flex items-center gap-1.5"
-            >
-              <CheckSquare className="w-3.5 h-3.5" />
-              <span>Mark All Present</span>
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={handleMarkAllPresentWithFeedback}
+            className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold transition-all cursor-pointer shadow-xs flex items-center gap-1 self-end sm:self-auto shrink-0"
+          >
+            <CheckSquare className="w-3 h-3" />
+            <span>Mark All Present</span>
+          </button>
         </div>
       ) : (
-        <div className="bg-emerald-50/90 border border-emerald-200/90 rounded-2xl p-3 sm:px-4 sm:py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs">
+        <div className="bg-gradient-to-r from-emerald-50 via-teal-50/50 to-emerald-50 border border-emerald-300/80 rounded-xl px-3.5 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs">
           <div className="flex items-center gap-2.5 min-w-0">
-            <span className="w-7 h-7 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-              <Check className="w-4 h-4 stroke-[3]" />
+            <span className="w-6 h-6 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+              <Check className="w-3.5 h-3.5 stroke-[3]" />
             </span>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs sm:text-sm font-extrabold text-emerald-950">
-                  Attendance Complete
-                </span>
-                <span className="text-[10px] font-extrabold px-2 py-0.2 rounded-full bg-emerald-200 text-emerald-900">
-                  {stats.present} Present &bull; {stats.absent} Absent
-                </span>
-              </div>
-              <p className="text-[11px] text-emerald-800 leading-tight">
-                All {stats.total} students recorded. Remember to save attendance permanently to lock in records.
-              </p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs sm:text-sm font-extrabold text-emerald-950">
+                Attendance Recorded & Completed:
+              </span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-200 font-mono">
+                {stats.present} Present &bull; {stats.absent} Absent
+              </span>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
-            <button
-              type="button"
-              onClick={handleClearAll}
-              className="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-xs font-bold transition-all cursor-pointer shadow-2xs flex items-center gap-1"
-            >
-              <X className="w-3 h-3 text-slate-500" />
-              <span>Clear All</span>
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={handleClearAll}
+            className="px-2.5 py-1 rounded-lg bg-white hover:bg-emerald-100/60 text-emerald-900 border border-emerald-300 text-[11px] font-bold transition-all cursor-pointer shadow-2xs flex items-center gap-1 self-end sm:self-auto shrink-0"
+          >
+            <X className="w-3 h-3 text-slate-500" />
+            <span>Reset</span>
+          </button>
         </div>
       )}
       
-      {/* 4 Metric Cards - Clean & Responsive */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
+      {/* Compact 4 Metric Cards Strip - Reduces vertical scroll */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
         
         {/* Total Students */}
-        <div className="bg-white p-3 sm:p-4 rounded-xl border border-slate-200 shadow-2xs space-y-1">
-          <div className="flex items-center justify-between text-slate-500">
-            <span className="text-xs font-bold text-slate-600 truncate">Total Students</span>
-            <span className="w-6 h-6 rounded-lg bg-slate-100 flex items-center justify-center text-slate-700 shrink-0">
-              <UserCheck className="w-3.5 h-3.5" />
-            </span>
+        <div className="bg-white px-3 py-1.5 sm:py-2 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
+          <div>
+            <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 block leading-tight">Total Students</span>
+            <span className="text-base sm:text-lg font-black text-slate-900 leading-tight">{stats.total}</span>
           </div>
-          <div className="flex items-baseline gap-1">
-            <span className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
-              {stats.total}
-            </span>
-            <span className="text-xs font-medium text-slate-500">enrolled</span>
-          </div>
-          <div className="text-[11px] text-slate-500 pt-1 border-t border-slate-100 truncate">
-            {currentClass.name}
-          </div>
+          <span className="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center text-slate-600 shrink-0">
+            <UserCheck className="w-3.5 h-3.5" />
+          </span>
         </div>
 
         {/* Present Students */}
-        <div className="bg-white p-3 sm:p-4 rounded-xl border border-emerald-300 shadow-2xs space-y-1">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-emerald-800 flex items-center gap-1.5 truncate">
-              <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse shrink-0"></span>
+        <div className="bg-white px-3 py-1.5 sm:py-2 rounded-xl border border-emerald-300 shadow-2xs flex items-center justify-between">
+          <div>
+            <span className="text-[10px] sm:text-[11px] font-bold text-emerald-800 flex items-center gap-1 leading-tight">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse shrink-0" />
               <span>Present</span>
             </span>
-            <span className="w-6 h-6 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-800 shrink-0">
-              <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-            </span>
-          </div>
-          <div className="flex items-baseline gap-1.5 flex-wrap">
-            <span className="text-xl sm:text-2xl font-extrabold text-emerald-700 tracking-tight">
-              {stats.present}
-            </span>
-            <span className="text-[11px] font-bold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800">
-              {stats.presentRate}%
-            </span>
-          </div>
-          <div className="pt-1 border-t border-emerald-100">
-            <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
-              <div 
-                className="bg-emerald-600 h-full rounded-full transition-all duration-300"
-                style={{ width: `${stats.presentRate}%` }}
-              ></div>
+            <div className="flex items-baseline gap-1 leading-tight">
+              <span className="text-base sm:text-lg font-black text-emerald-700">{stats.present}</span>
+              <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-1 rounded">{stats.presentRate}%</span>
             </div>
           </div>
+          <span className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-800 shrink-0">
+            <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+          </span>
         </div>
 
         {/* Absent Students */}
-        <div className="bg-white p-3 sm:p-4 rounded-xl border border-rose-300 shadow-2xs space-y-1">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-rose-800 truncate">Absent</span>
-            <span className="w-6 h-6 rounded-lg bg-rose-100 flex items-center justify-center text-rose-800 shrink-0">
-              <X className="w-3.5 h-3.5 stroke-[2.5]" />
-            </span>
-          </div>
-          <div className="flex items-baseline gap-1.5 flex-wrap">
-            <span className="text-xl sm:text-2xl font-extrabold text-rose-700 tracking-tight">
-              {stats.absent}
-            </span>
-            <span className="text-[11px] font-bold px-1.5 py-0.2 rounded bg-rose-100 text-rose-800">
-              {stats.absentRate}%
-            </span>
-          </div>
-          <div className="pt-1 border-t border-rose-100">
-            <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
-              <div 
-                className="bg-rose-600 h-full rounded-full transition-all duration-300"
-                style={{ width: `${stats.absentRate}%` }}
-              ></div>
+        <div className="bg-white px-3 py-1.5 sm:py-2 rounded-xl border border-rose-300 shadow-2xs flex items-center justify-between">
+          <div>
+            <span className="text-[10px] sm:text-[11px] font-bold text-rose-800 block leading-tight">Absent</span>
+            <div className="flex items-baseline gap-1 leading-tight">
+              <span className="text-base sm:text-lg font-black text-rose-700">{stats.absent}</span>
+              <span className="text-[10px] font-bold text-rose-800 bg-rose-100 px-1 rounded">{stats.absentRate}%</span>
             </div>
           </div>
+          <span className="w-7 h-7 rounded-lg bg-rose-100 flex items-center justify-center text-rose-800 shrink-0">
+            <X className="w-3.5 h-3.5 stroke-[2.5]" />
+          </span>
         </div>
 
-        {/* Late / Excused */}
-        <div className="bg-white p-3 sm:p-4 rounded-xl border border-slate-200 shadow-2xs space-y-1">
-          <div className="flex items-center justify-between text-slate-600">
-            <span className="text-xs font-bold text-slate-700 truncate">Late / Excused</span>
-            <span className="w-6 h-6 rounded-lg bg-slate-100 flex items-center justify-center text-slate-700 shrink-0">
-              <Clock className="w-3.5 h-3.5" />
-            </span>
+        {/* Late / Excused / Blank */}
+        <div className="bg-white px-3 py-1.5 sm:py-2 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
+          <div>
+            <span className="text-[10px] sm:text-[11px] font-bold text-slate-600 block leading-tight">Late / Blank</span>
+            <div className="flex items-baseline gap-1 leading-tight">
+              <span className="text-base sm:text-lg font-black text-slate-800">{stats.late + stats.excused}</span>
+              {stats.unmarked > 0 && (
+                <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-1 rounded">{stats.unmarked} blank</span>
+              )}
+            </div>
           </div>
-          <div className="flex items-baseline gap-1">
-            <span className="text-xl sm:text-2xl font-extrabold text-slate-800 tracking-tight">
-              {stats.late + stats.excused}
-            </span>
-            <span className="text-xs font-semibold text-slate-500">recorded</span>
-          </div>
-          <div className="pt-1 border-t border-slate-100 text-[11px] text-slate-500 truncate">
-            {stats.late} Late &bull; {stats.excused} Excused
-          </div>
+          <span className="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center text-slate-600 shrink-0">
+            <Clock className="w-3.5 h-3.5" />
+          </span>
         </div>
 
       </div>
 
-      {/* 100% Attendance Notification Banner */}
+      {/* 100% Attendance Notification Banner - Compact */}
       {stats.present === stats.total && stats.total > 0 && (
-        <div className="bg-slate-900 text-white p-3.5 sm:p-5 rounded-2xl shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
-              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" />
-            </div>
-            <div>
-              <h4 className="font-bold text-sm sm:text-base text-white">Full Attendance Today!</h4>
-              <p className="text-xs text-slate-300">All {stats.total} students are marked Present for {currentClass.name}.</p>
-            </div>
+        <div className="bg-slate-900 text-white px-3.5 py-2 rounded-xl shadow-2xs flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span className="text-xs font-bold text-white">Full Attendance Today ({stats.total} students Present)</span>
           </div>
           <button
             type="button"
             onClick={onOpenWhatsApp}
-            className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs shrink-0"
+            className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold px-3 py-1 rounded-lg transition-colors flex items-center gap-1 cursor-pointer shrink-0"
           >
-            <Share2 className="w-3.5 h-3.5" />
-            <span>Share Full Attendance to WhatsApp</span>
+            <Share2 className="w-3 h-3" />
+            <span>Share WhatsApp</span>
           </button>
         </div>
       )}
 
-      {/* Control Bar: Search & Full-Word Filter Tabs */}
+      {/* Attendance Mode Switcher: Styled identically to Teacher/HOD 3D sliding button */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <h3 className="text-xs sm:text-sm font-bold text-slate-900">Attendance Taking Method</h3>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+              {stats.present} Present &bull; {stats.absent} Absent &bull; {stats.unmarked} Unmarked
+            </span>
+          </div>
+        </div>
+
+        {/* Tactile 3D Sliding Switcher */}
+        <div className="relative flex items-center p-1.5 bg-slate-200/70 rounded-full border border-slate-300/80 shadow-[inset_0_2px_4px_rgba(0,0,0,0.06),0_1px_2px_rgba(255,255,255,0.85)] text-xs font-semibold select-none w-full sm:w-80 shrink-0">
+          <div
+            className={`absolute top-1.5 bottom-1.5 w-[calc(50%-6px)] rounded-full bg-gradient-to-b from-white via-white to-slate-50 border-t border-white border-b-2 border-b-slate-300 border-x border-slate-200/80 shadow-[0_4px_10px_-1px_rgba(15,23,42,0.16),0_2px_4px_-1px_rgba(15,23,42,0.08),inset_0_1px_0_rgba(255,255,255,1)] transition-all duration-300 ease-[cubic-bezier(0.2,0,0,1)] pointer-events-none ${
+              attendanceMode === 'normal'
+                ? 'left-1.5 translate-x-0'
+                : 'left-1.5 translate-x-[calc(100%+6px)]'
+            }`}
+          />
+
+          <button
+            type="button"
+            onClick={() => setAttendanceMode('normal')}
+            className={`relative z-10 flex-1 py-2 px-3 rounded-full text-center transition-all duration-200 cursor-pointer active:scale-95 flex items-center justify-center gap-1.5 ${
+              attendanceMode === 'normal'
+                ? 'text-slate-900 font-bold'
+                : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <CheckSquare className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Normal Roster</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleSwitchToManualRoll}
+            className={`relative z-10 flex-1 py-2 px-3 rounded-full text-center transition-all duration-200 cursor-pointer active:scale-95 flex items-center justify-center gap-1.5 ${
+              attendanceMode === 'manual-roll'
+                ? 'text-slate-900 font-bold'
+                : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <Hash className="w-3.5 h-3.5 text-sky-600" />
+            <span>Roll No. Entry</span>
+          </button>
+        </div>
+      </div>
+
+      {attendanceMode === 'normal' ? (
+        <>
+          {/* Control Bar: Search & Full-Word Filter Tabs */}
       <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5">
           
@@ -734,19 +953,6 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                 <Square className="w-3.5 h-3.5 text-rose-600 shrink-0" />
                 <span className="truncate">All Absent</span>
               </button>
-
-              {onInvertSelection && (
-                <button
-                  id="action-invert-selection"
-                  type="button"
-                  onClick={onInvertSelection}
-                  className="flex items-center justify-center gap-1 sm:gap-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold px-2 py-2 rounded-xl transition-colors cursor-pointer min-h-[40px] text-center"
-                  title="Invert current selections"
-                >
-                  <ArrowRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                  <span className="truncate">Invert</span>
-                </button>
-              )}
 
               <button
                 id="action-clear-all-blank"
@@ -1001,6 +1207,179 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
           </div>
         </div>
       </div>
+      </>
+      ) : (
+        /* =========================================================================
+           MANUAL ROLL NUMBER ENTRY CONSOLE (Streamlined, no duplicate roster)
+           ========================================================================= */
+        <div className="max-w-2xl mx-auto w-full space-y-3">
+          
+          {/* Input & Callout Card */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-xs space-y-3.5">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                  <Hash className="w-4 h-4 text-sky-600" />
+                  <span>Enter Roll Number</span>
+                </h3>
+                <p className="text-[11px] text-slate-500 font-medium">
+                  Type roll numbers of present students & press Enter. Un-entered students are marked Absent automatically.
+                </p>
+              </div>
+              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">
+                {currentClass.name}
+              </span>
+            </div>
+
+            {/* Form Input */}
+            <form onSubmit={handleMarkRollNumbers} className="space-y-3">
+              <div className="relative">
+                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-mono text-sm font-bold">
+                  #
+                </span>
+                <input
+                  type="text"
+                  value={manualRollInput}
+                  onChange={(e) => setManualRollInput(e.target.value)}
+                  placeholder="Enter Roll No (e.g. 5, 12, 14 or 1-10)..."
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-28 py-3 text-sm font-bold text-slate-900 placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:outline-hidden focus:border-sky-500 focus:ring-4 focus:ring-sky-100 transition-all shadow-inner"
+                  autoFocus
+                />
+                <button
+                  type="submit"
+                  disabled={!manualRollInput.trim()}
+                  className="absolute right-1.5 top-1.5 bottom-1.5 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:scale-95 disabled:opacity-40 disabled:pointer-events-none text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                >
+                  <Check className="w-3.5 h-3.5 stroke-[3]" />
+                  <span>Mark Present</span>
+                </button>
+              </div>
+            </form>
+
+            {/* Feedback Alert with Direct WhatsApp Action */}
+            {rollFeedback && (
+              <div className={`p-3 rounded-xl border animate-fadeIn text-xs ${
+                rollFeedback.type === 'success'
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                  : 'bg-rose-50 border-rose-200 text-rose-900'
+              }`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-start gap-2">
+                    {rollFeedback.type === 'success' ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    )}
+                    <div>
+                      <p className="font-bold">{rollFeedback.message}</p>
+                      {rollFeedback.student && (
+                        <p className="text-[11px] opacity-80 mt-0.5">
+                          Parent: {rollFeedback.student.parentName || 'N/A'} &bull; Phone: {rollFeedback.student.parentPhone || 'No phone'}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setRollFeedback(null)}
+                    className="text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                {/* WhatsApp Direct Action Button */}
+                {rollFeedback.student && (
+                  <div className="mt-2.5 pt-2 border-t border-emerald-200/80 flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-emerald-800 font-semibold">Notify Parent:</span>
+                    <button
+                      type="button"
+                      onClick={() => handleSendParentWhatsApp(rollFeedback.student!, 'present')}
+                      className="inline-flex items-center gap-1.5 bg-[#25D366] hover:bg-[#1faa4f] active:scale-95 text-white font-bold text-xs px-3 py-1.5 rounded-lg shadow-2xs transition-all cursor-pointer"
+                      title="Send attendance message to parent on WhatsApp"
+                    >
+                      <Share2 className="w-3.5 h-3.5" />
+                      <span>Send WhatsApp Notice</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Interactive 1-Tap Roll Number Grid */}
+            <div className="pt-2 border-t border-slate-100 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-700 flex items-center gap-1">
+                  <span>1-Tap Number Pad ({classStudents.length} students):</span>
+                </span>
+                <span className="text-[10px] text-slate-400 font-medium">Click chip to toggle Present / Absent</span>
+              </div>
+
+              <div className="grid grid-cols-6 sm:grid-cols-10 gap-1.5 max-h-48 overflow-y-auto p-1.5 bg-slate-50/80 rounded-xl border border-slate-200">
+                {sortedClassStudents.map(student => {
+                  const rec = session.records[student.id];
+                  const status = rec?.status || 'absent';
+                  const isPresent = status === 'present';
+                  const isAbsent = status === 'absent';
+
+                  return (
+                    <button
+                      key={student.id}
+                      type="button"
+                      onClick={() => handleToggleRollChip(student)}
+                      title={`Roll #${student.rollNo}: ${student.name} (${status.toUpperCase()})`}
+                      className={`py-1.5 px-1 rounded-lg text-xs font-bold transition-all text-center cursor-pointer select-none active:scale-90 ${
+                        isPresent
+                          ? 'bg-emerald-600 text-white shadow-xs ring-1 ring-emerald-500'
+                          : isAbsent
+                          ? 'bg-rose-100 text-rose-800 border border-rose-300'
+                          : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100 hover:border-slate-300'
+                      }`}
+                    >
+                      {student.rollNo}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Quick Actions & Permanent Save Button */}
+            <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row items-center gap-2">
+              <button
+                type="button"
+                onClick={handleClearAll}
+                className="w-full sm:w-auto flex items-center justify-center gap-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-3.5 py-2.5 rounded-xl transition-all cursor-pointer"
+                title="Reset all back to unmarked"
+              >
+                <X className="w-3.5 h-3.5 text-slate-500" />
+                <span>Reset</span>
+              </button>
+
+              {onSaveAttendancePermanently && (
+                <button
+                  type="button"
+                  onClick={onSaveAttendancePermanently}
+                  className="flex-1 w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs sm:text-sm py-2.5 px-4 rounded-xl shadow-xs transition-all cursor-pointer"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>Save Attendance Permanently</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={onOpenWhatsApp}
+                className="w-full sm:w-auto flex items-center justify-center gap-1.5 bg-[#25D366] hover:bg-[#1faa4f] active:scale-95 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-xs transition-all cursor-pointer"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+                <span>Share WhatsApp</span>
+              </button>
+            </div>
+          </div>
+
+        </div>
+      )}
 
       {/* Class Remarks Card */}
       <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs space-y-2">

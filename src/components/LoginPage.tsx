@@ -90,7 +90,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           setIsSubmitting(false);
           return;
         }
-        if (cleanUser.toLowerCase() !== 'dyp' && cleanUser.toLowerCase() !== 'hod') {
+        const expectedHodUser = (settings.hodName || 'dyp').trim().toLowerCase();
+        const matchesHodUser = (
+          cleanUser.toLowerCase() === expectedHodUser || 
+          cleanUser.toLowerCase() === 'dyp' || 
+          cleanUser.toLowerCase() === 'hod'
+        );
+        if (!matchesHodUser) {
           handleFailedAttempt('Invalid HOD Credential.');
           setIsSubmitting(false);
           return;
@@ -277,7 +283,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         <form onSubmit={handleSignIn} className="space-y-3.5" autoComplete="off">
           
           {/* Input 1: Faculty ID or HOD Credential */}
-          <div className="group relative flex items-center bg-[#FAFBFD] [background-image:radial-gradient(#CBD5E1_0.75px,transparent_0.75px)] [background-size:6px_6px] rounded-full px-5 py-3 border border-slate-200/90 shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:border-slate-300 hover:shadow-[0_2px_6px_rgba(0,0,0,0.05)] active:scale-[0.99] focus-within:scale-[1.01] focus-within:bg-white focus-within:[background-image:none] focus-within:border-sky-400 focus-within:ring-4 focus-within:ring-sky-100/80 focus-within:shadow-[0_2px_8px_rgba(56,189,248,0.12)] transition-all duration-200 ease-out">
+          <label 
+            htmlFor="input-username"
+            className="group relative flex items-center bg-slate-50/90 rounded-full px-5 py-3 border border-slate-200/90 shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:border-slate-300 hover:shadow-[0_2px_6px_rgba(0,0,0,0.05)] focus-within:bg-white focus-within:border-sky-500 focus-within:ring-4 focus-within:ring-sky-100/80 focus-within:shadow-[0_2px_8px_rgba(56,189,248,0.12)] transition-all duration-200 ease-out cursor-text"
+          >
             <div className="shrink-0 transition-transform duration-200 ease-out group-focus-within:scale-110">
               {activeRoleMode === 'teacher' ? (
                 <KeyRound className="w-4 h-4 text-emerald-600 stroke-[2.2] transition-colors duration-200" />
@@ -294,17 +303,20 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 setUsername(e.target.value);
                 if (errorMessage) setErrorMessage('');
               }}
-              placeholder={activeRoleMode === 'teacher' ? 'Faculty ID' : 'HOD Credential'}
-              className="w-full pl-3 pr-2 text-xs sm:text-sm text-slate-800 placeholder-slate-400 font-semibold bg-transparent focus:outline-hidden transition-colors disabled:opacity-50"
+              placeholder={activeRoleMode === 'teacher' ? 'Enter Faculty ID (e.g. TEACH101)' : 'Enter HOD Username (e.g. dyp)'}
+              className="w-full pl-3 pr-2 text-xs sm:text-sm text-slate-800 placeholder:text-slate-400 font-medium bg-transparent focus:outline-hidden focus:placeholder-transparent transition-colors disabled:opacity-50"
               autoComplete="off"
               autoCorrect="off"
               autoCapitalize="off"
               spellCheck={false}
             />
-          </div>
+          </label>
 
           {/* Input 2: Password */}
-          <div className="group relative flex items-center bg-[#FAFBFD] [background-image:radial-gradient(#CBD5E1_0.75px,transparent_0.75px)] [background-size:6px_6px] rounded-full px-5 py-3 border border-slate-200/90 shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:border-slate-300 hover:shadow-[0_2px_6px_rgba(0,0,0,0.05)] active:scale-[0.99] focus-within:scale-[1.01] focus-within:bg-white focus-within:[background-image:none] focus-within:border-sky-400 focus-within:ring-4 focus-within:ring-sky-100/80 focus-within:shadow-[0_2px_8px_rgba(56,189,248,0.12)] transition-all duration-200 ease-out">
+          <label 
+            htmlFor="input-password"
+            className="group relative flex items-center bg-slate-50/90 rounded-full px-5 py-3 border border-slate-200/90 shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:border-slate-300 hover:shadow-[0_2px_6px_rgba(0,0,0,0.05)] focus-within:bg-white focus-within:border-sky-500 focus-within:ring-4 focus-within:ring-sky-100/80 focus-within:shadow-[0_2px_8px_rgba(56,189,248,0.12)] transition-all duration-200 ease-out cursor-text"
+          >
             <div className="shrink-0 transition-transform duration-200 ease-out group-focus-within:scale-110">
               <Lock className="w-4 h-4 text-slate-700 stroke-[2.2] transition-colors duration-200" />
             </div>
@@ -317,20 +329,25 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 setPassword(e.target.value);
                 if (errorMessage) setErrorMessage('');
               }}
-              placeholder="••••••••••"
-              className="w-full pl-3 pr-2 text-xs sm:text-sm text-slate-800 placeholder-slate-400 font-semibold bg-transparent focus:outline-hidden tracking-wider transition-colors disabled:opacity-50"
+              placeholder="Enter password"
+              className={`w-full pl-3 pr-2 text-xs sm:text-sm text-slate-800 placeholder:text-slate-400 font-medium bg-transparent focus:outline-hidden focus:placeholder-transparent transition-colors disabled:opacity-50 ${
+                password.length > 0 && !showPassword ? 'tracking-wider font-mono' : ''
+              }`}
               autoComplete="new-password"
               spellCheck={false}
             />
             <button
               type="button"
-              onClick={() => setShowPassword(!showPassword)}
+              onClick={(e) => {
+                e.preventDefault();
+                setShowPassword(!showPassword);
+              }}
               className="text-slate-400 hover:text-slate-600 active:scale-90 p-1 cursor-pointer transition-all duration-150"
               title={showPassword ? 'Hide password' : 'Show password'}
             >
               {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
             </button>
-          </div>
+          </label>
 
           {/* Sign In & Hardware Biometric Row */}
           <div className="flex items-center justify-between gap-2 pt-2 pb-1">

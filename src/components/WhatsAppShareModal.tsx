@@ -122,7 +122,7 @@ export const WhatsAppShareModal: React.FC<WhatsAppShareModalProps> = ({
                   onChange={(e) => setConfig(prev => ({ ...prev, includeAbsentList: e.target.checked }))}
                   className="w-4 h-4 rounded-md text-slate-900 focus:ring-slate-900 accent-slate-900 cursor-pointer"
                 />
-                <span>List Absent Students & Reasons</span>
+                <span>List Absent Roll Numbers (Row, Comma-Separated)</span>
               </label>
 
               <label className="flex items-center gap-2.5 text-xs font-bold text-slate-700 cursor-pointer select-none">
@@ -132,7 +132,7 @@ export const WhatsAppShareModal: React.FC<WhatsAppShareModalProps> = ({
                   onChange={(e) => setConfig(prev => ({ ...prev, includeLateList: e.target.checked }))}
                   className="w-4 h-4 rounded-md text-slate-900 focus:ring-slate-900 accent-slate-900 cursor-pointer"
                 />
-                <span>List Late Arrivals</span>
+                <span>List Late Roll Numbers (Row, Comma-Separated)</span>
               </label>
 
               <label className="flex items-center gap-2.5 text-xs font-bold text-slate-700 cursor-pointer select-none">
