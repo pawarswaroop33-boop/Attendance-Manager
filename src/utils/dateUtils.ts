@@ -66,13 +66,18 @@ export const isValidRecordedSession = (session: any): boolean => {
     return false;
   }
 
-  if (session.isRealSession === true || session.isRegistered === true) {
-    return true;
-  }
-
+  // Session MUST have at least 1 student marked with a valid status
   const records = session.records || {};
   const recordValues = Object.values(records) as any[];
-  return recordValues.some(r => r && typeof r === 'object' && r.status && r.status !== 'unmarked');
+  const hasAnyMarkedRecord = recordValues.some(
+    r => r && typeof r === 'object' && r.status && r.status !== 'unmarked'
+  );
+
+  if (!hasAnyMarkedRecord) {
+    return false;
+  }
+
+  return true;
 };
 
 /**
