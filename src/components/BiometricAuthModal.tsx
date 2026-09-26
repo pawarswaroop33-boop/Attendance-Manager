@@ -1,6 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { Fingerprint, CheckCircle2, AlertCircle, X, ShieldAlert, Cpu, Lock, UserCheck } from 'lucide-react';
-import { biometricService, BiometricCredential } from '../services/biometricService';
+import { 
+  Fingerprint, 
+  CheckCircle2, 
+  AlertCircle, 
+  X, 
+  ShieldAlert, 
+  Cpu, 
+  Lock, 
+  UserCheck, 
+  ShieldCheck,
+  KeyRound
+} from 'lucide-react';
+import { biometricService, BiometricCredential, FingerType, FINGER_LABELS } from '../services/biometricService';
 import { AuthUser, Teacher, SystemSettings } from '../types';
 
 interface BiometricAuthModalProps {
@@ -24,21 +35,24 @@ export const BiometricAuthModal: React.FC<BiometricAuthModalProps> = ({
 }) => {
   const [scanState, setScanState] = useState<'idle' | 'scanning' | 'success' | 'not-enrolled' | 'unauthorized' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
-  const [hardwareName, setHardwareName] = useState('System Biometric Sensor');
+  const [hardwareName, setHardwareName] = useState('Hardware Biometric Sensor');
+  const [targetCredential, setTargetCredential] = useState<BiometricCredential | null>(null);
   const [verifiedTeacher, setVerifiedTeacher] = useState<{ name: string; id: string; role: 'teacher' | 'hod' } | null>(null);
+  const [matchScore, setMatchScore] = useState<number | null>(null);
 
   useEffect(() => {
     if (isOpen) {
       setHardwareName(biometricService.getBiometricHardwareName());
       setErrorMessage('');
       setVerifiedTeacher(null);
+      setMatchScore(null);
       
       const allEnrolled = biometricService.getRegisteredCredentials();
 
       if (allEnrolled.length === 0) {
         setScanState('not-enrolled');
+        setTargetCredential(null);
       } else {
-        // If an ID was entered in the login input or HOD mode is active, check specific enrollment
         const cleanEntered = enteredUsername.trim().toUpperCase();
         const isHodMode = activeRoleMode === 'hod' || cleanEntered === 'DYP' || cleanEntered === 'HOD';
 
@@ -51,9 +65,11 @@ export const BiometricAuthModal: React.FC<BiometricAuthModalProps> = ({
           );
           if (!hodEnrolled) {
             setScanState('not-enrolled');
+            setTargetCredential(null);
             setErrorMessage('HOD has not enrolled a biometric fingerprint on this system yet.');
             return;
           }
+          setTargetCredential(hodEnrolled);
         } else if (cleanEntered) {
           const specificEnrolled = allEnrolled.find(c => 
             c.userId.trim().toUpperCase() === cleanEntered ||
@@ -61,13 +77,16 @@ export const BiometricAuthModal: React.FC<BiometricAuthModalProps> = ({
           );
           if (!specificEnrolled) {
             setScanState('not-enrolled');
+            setTargetCredential(null);
             setErrorMessage(`Faculty ID "${enteredUsername}" has not enrolled a biometric fingerprint on this system yet.`);
             return;
           }
+          setTargetCredential(specificEnrolled);
+        } else {
+          setTargetCredential(allEnrolled[0]);
         }
 
         setScanState('idle');
-        // Auto-initiate hardware sensor scan
         handleHardwareBiometricScan();
       }
     }
@@ -75,13 +94,17 @@ export const BiometricAuthModal: React.FC<BiometricAuthModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleHardwareBiometricScan = async () => {
+  const handleHardwareBiometricScan = async (fingerOverride?: FingerType) => {
     setScanState('scanning');
     setErrorMessage('');
+    setMatchScore(null);
+
+    // Minor tactile scan delay
+    await new Promise(r => setTimeout(r, 450));
 
     try {
       const cleanEntered = enteredUsername.trim();
-      const result = await biometricService.verifyEnrolledHardwareBiometric(cleanEntered || undefined);
+      const result = await biometricService.verifyEnrolledHardwareBiometric(cleanEntered || undefined, fingerOverride);
 
       if (!result.enrolled) {
         setScanState('not-enrolled');
@@ -114,6 +137,7 @@ export const BiometricAuthModal: React.FC<BiometricAuthModalProps> = ({
           }
         }
 
+        setMatchScore(result.matchScore || 0.98);
         setVerifiedTeacher({
           name: cred.userName,
           id: cred.userId,
@@ -123,7 +147,8 @@ export const BiometricAuthModal: React.FC<BiometricAuthModalProps> = ({
       } else {
         // STRICT: Unrecognized fingerprint is rejected
         setScanState('unauthorized');
-        setErrorMessage(result.message || 'Access Denied: Unrecognized fingerprint. Only enrolled faculty fingerprint is allowed to unlock.');
+        setMatchScore(result.matchScore || 0.12);
+        setErrorMessage(result.message || 'Access Denied: Unrecognized fingerprint. Hardware enclave rejected the scan.');
         if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
           try { navigator.vibrate([100, 50, 100, 50, 100]); } catch {}
         }
@@ -131,7 +156,7 @@ export const BiometricAuthModal: React.FC<BiometricAuthModalProps> = ({
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Biometric hardware rejected the scan.';
       setScanState('unauthorized');
-      setErrorMessage(`Access Denied: ${msg}. Only enrolled faculty fingerprint is allowed.`);
+      setErrorMessage(`Access Denied: ${msg}. Only enrolled faculty fingerprint is authorized.`);
     }
   };
 
@@ -206,13 +231,13 @@ export const BiometricAuthModal: React.FC<BiometricAuthModalProps> = ({
         </div>
 
         <h3 className="text-lg font-extrabold text-slate-900 tracking-tight">
-          Hardware Biometric Unlock
+          Hardware Biometric Enclave
         </h3>
         <p className="text-xs text-slate-500 mt-1 max-w-[260px] mx-auto">
           {scanState === 'not-enrolled'
             ? 'No fingerprint registered on this device'
             : scanState === 'unauthorized'
-            ? 'Strict Hardware Security Active'
+            ? 'Strict Hardware Protection Active'
             : `Hardware verification via ${hardwareName}`}
         </p>
 
@@ -224,16 +249,16 @@ export const BiometricAuthModal: React.FC<BiometricAuthModalProps> = ({
               <span>Enrollment Required</span>
             </div>
             <p className="text-[11px] text-amber-700 leading-relaxed">
-              {errorMessage || 'Each teacher has an enrollment option inside their own portal tab.'}
+              {errorMessage || 'Each teacher has an enrollment option inside their portal.'}
             </p>
             <p className="text-[11px] text-slate-600 pt-1">
               <strong>How to enroll:</strong>
               <br />
               1. Sign in using your Faculty ID and password.
               <br />
-              2. Click <span className="font-bold text-slate-800">"Biometric ID"</span> in your tab.
+              2. Click <span className="font-bold text-slate-800">"Biometric ID"</span> in your portal tab.
               <br />
-              3. Scan your finger once to enroll on this system.
+              3. Scan your finger once to bind it permanently to your hardware enclave.
             </p>
             <button
               type="button"
@@ -247,18 +272,26 @@ export const BiometricAuthModal: React.FC<BiometricAuthModalProps> = ({
           /* State 2 & 3: SCANNING / UNAUTHORIZED / SUCCESS */
           <div className="my-4 flex flex-col items-center justify-center">
             
-            {/* Sensor Scanner Circle - Simple, clean native design */}
+            {/* Target Account Badge */}
+            {targetCredential && (
+              <div className="mb-3 py-1 px-3 bg-slate-100 rounded-full border border-slate-200 text-[11px] text-slate-700 font-semibold flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                <span>Enrolled: <strong>{targetCredential.userName}</strong> ({targetCredential.fingerLabel})</span>
+              </div>
+            )}
+
+            {/* Sensor Scanner Circle */}
             <button
               type="button"
-              onClick={handleHardwareBiometricScan}
+              onClick={() => handleHardwareBiometricScan()}
               disabled={scanState === 'scanning' || scanState === 'success'}
               className={`relative w-24 h-24 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer select-none ${
                 scanState === 'scanning'
-                  ? 'bg-sky-50 ring-4 ring-sky-100'
+                  ? 'bg-sky-50 ring-4 ring-sky-200 scale-105'
                   : scanState === 'success'
-                  ? 'bg-emerald-50 ring-4 ring-emerald-100'
+                  ? 'bg-emerald-50 ring-4 ring-emerald-200'
                   : scanState === 'unauthorized'
-                  ? 'bg-rose-50 ring-4 ring-rose-100'
+                  ? 'bg-rose-50 ring-4 ring-rose-200'
                   : 'bg-slate-100 hover:bg-sky-50 hover:ring-2 hover:ring-sky-100 active:scale-95'
               }`}
             >
@@ -278,7 +311,7 @@ export const BiometricAuthModal: React.FC<BiometricAuthModalProps> = ({
               {scanState === 'scanning' && (
                 <span className="text-sky-600 text-xs font-bold inline-flex items-center gap-1.5 animate-pulse">
                   <span className="w-2 h-2 rounded-full bg-sky-500 animate-ping" />
-                  Touch hardware sensor with enrolled finger...
+                  Reading fingerprint on hardware sensor...
                 </span>
               )}
               {scanState === 'success' && verifiedTeacher && (
@@ -295,23 +328,23 @@ export const BiometricAuthModal: React.FC<BiometricAuthModalProps> = ({
                 <div className="text-rose-600 text-xs font-bold max-w-[280px] text-center leading-snug">
                   <p>{errorMessage || 'Access Denied: Unrecognized fingerprint.'}</p>
                   <p className="text-[11px] text-slate-500 font-normal mt-1">
-                    No other fingerprint is allowed. Only enrolled faculty members can enter.
+                    No other fingerprint is allowed. Only the enrolled finger is permitted.
                   </p>
                 </div>
               )}
               {scanState === 'idle' && (
-                <span className="text-slate-500 text-xs">
+                <span className="text-slate-500 text-xs font-medium">
                   Tap sensor button to verify hardware fingerprint
                 </span>
               )}
             </div>
 
-            {/* Retry Button on Access Denied */}
+            {/* Retry / Alternate Scan */}
             {scanState === 'unauthorized' && (
               <button
                 type="button"
-                onClick={handleHardwareBiometricScan}
-                className="mt-2 py-2 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs cursor-pointer transition-all active:scale-95"
+                onClick={() => handleHardwareBiometricScan()}
+                className="mt-2 py-2 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs cursor-pointer transition-all active:scale-95 shadow-2xs"
               >
                 Scan Enrolled Finger Again
               </button>
@@ -326,8 +359,8 @@ export const BiometricAuthModal: React.FC<BiometricAuthModalProps> = ({
             <Cpu className="w-3 h-3 text-slate-400" />
             <span>Hardware Enclave</span>
           </div>
-          <span className="font-semibold text-slate-600">
-            {enrolledCount} Faculty Fingerprint{enrolledCount !== 1 ? 's' : ''} Enrolled
+          <span className="font-bold text-slate-600">
+            {enrolledCount} Faculty Fingerprint{enrolledCount !== 1 ? 's' : ''} Locked
           </span>
         </div>
 
