@@ -9,6 +9,7 @@ import {
   TimetableSlot, 
   SystemSettings 
 } from '../types';
+import { isLegacyDummySession } from '../utils/dateUtils';
 
 export const DEFAULT_SUPABASE_URL = 'https://lascgvyktowhgrfcnqbp.supabase.co';
 export const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_TnPeA9j7P_JkSTa4VpEQRw_xYI3_59R';
@@ -174,6 +175,9 @@ export class SupabaseDatabaseAdapter implements CampusDatabaseAdapter {
         if (rawState && typeof rawState === 'object') {
           this._isConnected = true;
           this._tablesVerified = true;
+          if (Array.isArray(rawState.sessions)) {
+            rawState.sessions = rawState.sessions.filter((s: any) => !isLegacyDummySession(s));
+          }
           return rawState as CampusState;
         }
       }
@@ -260,19 +264,21 @@ export class SupabaseDatabaseAdapter implements CampusDatabaseAdapter {
           roomName: r.room_name
         }));
 
-        const sessions: AttendanceSession[] = (sessionsRows || []).map(r => ({
-          id: r.id,
-          classId: r.class_id,
-          date: r.date,
-          sessionName: r.session_name,
-          teacherName: r.teacher_name,
-          lectureSlotId: r.lecture_slot_id,
-          timeSlot: r.time_slot,
-          subject: r.subject,
-          records: r.records || {},
-          lastUpdated: r.last_updated,
-          remarks: r.remarks
-        }));
+        const sessions: AttendanceSession[] = (sessionsRows || [])
+          .map(r => ({
+            id: r.id,
+            classId: r.class_id,
+            date: r.date,
+            sessionName: r.session_name,
+            teacherName: r.teacher_name,
+            lectureSlotId: r.lecture_slot_id,
+            timeSlot: r.time_slot,
+            subject: r.subject,
+            records: r.records || {},
+            lastUpdated: r.last_updated,
+            remarks: r.remarks
+          }))
+          .filter(s => !isLegacyDummySession(s));
 
         const settings: SystemSettings = settingsRow ? {
           collegeName: settingsRow.college_name,
@@ -307,8 +313,13 @@ export class SupabaseDatabaseAdapter implements CampusDatabaseAdapter {
     if (!this.client) return;
 
     try {
+      const cleanSessions = Array.isArray(state.sessions) 
+        ? state.sessions.filter(s => !isLegacyDummySession(s)) 
+        : [];
+
       const payload = {
         ...state,
+        sessions: cleanSessions,
         settings: {
           ...state.settings,
           cloudSyncStatus: 'synced',

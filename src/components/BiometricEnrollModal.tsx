@@ -12,9 +12,11 @@ import {
   Sparkles,
   ShieldAlert,
   Sliders,
-  Check
+  Check,
+  Shield,
+  GraduationCap
 } from 'lucide-react';
-import { biometricService, BiometricCredential, FingerType, FINGER_LABELS } from '../services/biometricService';
+import { webauthnService, RegisteredCredentialInfo } from '../services/webauthnService';
 import { AuthUser } from '../types';
 
 interface BiometricEnrollModalProps {
@@ -23,32 +25,48 @@ interface BiometricEnrollModalProps {
   currentUser: AuthUser;
 }
 
+const FINGER_OPTIONS = [
+  'Right Index Finger',
+  'Right Thumb',
+  'Left Index Finger',
+  'Left Thumb',
+  'Primary Fingerprint / Passkey'
+];
+
 export const BiometricEnrollModal: React.FC<BiometricEnrollModalProps> = ({
   isOpen,
   onClose,
   currentUser
 }) => {
-  const [enrolledCred, setEnrolledCred] = useState<BiometricCredential | null>(null);
+  const [enrolledCred, setEnrolledCred] = useState<RegisteredCredentialInfo | null>(null);
   const [hardwareName, setHardwareName] = useState('Hardware Biometric Sensor');
   const [enrollState, setEnrollState] = useState<'idle' | 'scanning' | 'success' | 'testing' | 'test-success' | 'test-failed' | 'error'>('idle');
-  const [selectedFinger, setSelectedFinger] = useState<FingerType>('right_index');
-  const [testFinger, setTestFinger] = useState<FingerType>('right_index');
+  const [selectedFingerLabel, setSelectedFingerLabel] = useState<string>('Right Index Finger');
   const [statusMessage, setStatusMessage] = useState('');
-  const [matchScore, setMatchScore] = useState<number | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   const userId = currentUser.uniqueCode || currentUser.id;
 
-  const loadStatus = () => {
-    setHardwareName(biometricService.getBiometricHardwareName());
-    const cred = biometricService.getCredentialForUser(userId);
-    setEnrolledCred(cred || null);
-    if (cred?.fingerType) {
-      setSelectedFinger(cred.fingerType);
-      setTestFinger(cred.fingerType);
+  const loadStatus = async () => {
+    setHardwareName(webauthnService.getHardwareName());
+    setIsLoading(true);
+    try {
+      const list = await webauthnService.getCredentials(userId, currentUser.role);
+      if (list.length > 0) {
+        setEnrolledCred(list[0]);
+        if (list[0].fingerLabel) {
+          setSelectedFingerLabel(list[0].fingerLabel);
+        }
+      } else {
+        setEnrolledCred(null);
+      }
+    } catch {
+      setEnrolledCred(null);
+    } finally {
+      setIsLoading(false);
+      setEnrollState('idle');
+      setStatusMessage('');
     }
-    setEnrollState('idle');
-    setStatusMessage('');
-    setMatchScore(null);
   };
 
   useEffect(() => {
@@ -61,79 +79,94 @@ export const BiometricEnrollModal: React.FC<BiometricEnrollModalProps> = ({
 
   const handleEnroll = async () => {
     setEnrollState('scanning');
-    setStatusMessage(`Place your ${FINGER_LABELS[selectedFinger]} firmly on the biometric sensor...`);
-    setMatchScore(null);
+    setStatusMessage(`Prompting ${hardwareName}... Please scan your fingerprint on your device's biometric sensor.`);
 
     try {
-      const result = await biometricService.enrollHardwareBiometric(
+      const result = await webauthnService.enrollBiometric(
         userId,
         currentUser.name,
         currentUser.role,
-        selectedFinger
+        selectedFingerLabel
       );
 
       if (result.success && result.credential) {
         setEnrolledCred(result.credential);
-        setTestFinger(result.credential.fingerType);
         setEnrollState('success');
-        setStatusMessage(`Enrolled ${result.credential.fingerLabel} successfully in Secure Hardware Enclave!`);
+        setStatusMessage(`Biometric credential successfully bound to ${currentUser.role === 'hod' ? 'HOD' : 'Faculty'} account on this device.`);
         if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
           try { navigator.vibrate([60, 40, 60]); } catch {}
         }
       } else {
         setEnrollState('error');
-        setStatusMessage(result.message || 'Sensor enrollment failed. Please try again.');
+        setStatusMessage(result.message || 'Biometric enrollment failed. Please try again.');
       }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Sensor interaction error';
+    } catch (err: any) {
       setEnrollState('error');
-      setStatusMessage(msg);
+      setStatusMessage(err.message || 'Sensor enrollment error.');
     }
   };
 
-  const handleTestSensor = async (fingerToTest: FingerType) => {
+  const handleTestPasskey = async () => {
     if (!enrolledCred) return;
     setEnrollState('testing');
-    setTestFinger(fingerToTest);
-    setStatusMessage(`Scanning ${FINGER_LABELS[fingerToTest]} on hardware sensor...`);
-    setMatchScore(null);
-
-    // Give visual sensor feedback
-    await new Promise(r => setTimeout(r, 600));
+    setStatusMessage(`Testing biometric authentication for ${currentUser.name}... Please scan your enrolled fingerprint.`);
 
     try {
-      const result = await biometricService.verifyEnrolledHardwareBiometric(userId, fingerToTest);
+      const result = await webauthnService.authenticateBiometric(
+        currentUser.role,
+        userId
+      );
+
       if (result.success) {
         setEnrollState('test-success');
-        setMatchScore(result.matchScore || 0.98);
-        setStatusMessage(`Fingerprint Verified! Scanned ${FINGER_LABELS[fingerToTest]} matches enrolled template (Score: ${Math.round((result.matchScore || 0.98) * 100)}%).`);
+        setStatusMessage(`Authentication Success: Verified passkey belongs strictly to ${currentUser.role.toUpperCase()} account (${currentUser.name})!`);
         if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
           try { navigator.vibrate([40, 50, 40]); } catch {}
         }
       } else {
         setEnrollState('test-failed');
-        setMatchScore(result.matchScore || 0.12);
-        setStatusMessage(result.message || 'Access Denied: Unrecognized finger pattern.');
+        setStatusMessage(result.message || 'Access Denied: Biometric verification failed.');
         if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
           try { navigator.vibrate([100, 50, 100]); } catch {}
         }
       }
     } catch {
       setEnrollState('test-failed');
-      setStatusMessage('Access Denied: Unrecognized fingerprint.');
+      setStatusMessage('Access Denied: Sensor verification rejected.');
     }
   };
 
-  const handleRemove = () => {
-    biometricService.removeCredential(userId);
-    setEnrolledCred(null);
-    setEnrollState('idle');
-    setStatusMessage('Biometric credential safely wiped from device enclave.');
-    setMatchScore(null);
+  const handleRemove = async () => {
+    if (!enrolledCred) return;
+    const ok = await webauthnService.revokeCredential(enrolledCred.id);
+    if (ok) {
+      setEnrolledCred(null);
+      setEnrollState('idle');
+      setStatusMessage('Biometric credential safely revoked from server.');
+    } else {
+      setStatusMessage('Failed to revoke credential. Please retry.');
+    }
+  };
+
+  const handleClearAllForUser = async () => {
+    setEnrollState('scanning');
+    setStatusMessage('Clearing enrolled biometric credentials from server...');
+    const res = await webauthnService.clearCredentials(userId, currentUser.role);
+    if (res.success) {
+      setEnrolledCred(null);
+      setEnrollState('idle');
+      setStatusMessage('Enrolled fingerprint successfully cleared.');
+      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        try { navigator.vibrate([40, 40]); } catch {}
+      }
+    } else {
+      setEnrollState('error');
+      setStatusMessage(res.message || 'Failed to clear enrolled fingerprint.');
+    }
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 bg-slate-900/65 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
       <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl border border-sky-100 text-slate-800 relative overflow-hidden animate-in zoom-in-95 duration-200 max-h-[92vh] overflow-y-auto">
         
         {/* Close Button */}
@@ -152,15 +185,15 @@ export const BiometricEnrollModal: React.FC<BiometricEnrollModalProps> = ({
           </div>
           <div>
             <h3 className="text-base sm:text-lg font-extrabold text-slate-900 leading-tight">
-              Hardware Biometric Enclave
+              WebAuthn Biometric Security
             </h3>
             <p className="text-xs text-slate-500">
-              Strict Enrolled Fingerprint Protection &bull; Zero False Accepts
+              Hardware-Bound Biometric Passkey &bull; Strict Role Isolation
             </p>
           </div>
         </div>
 
-        {/* Current Faculty Info Pill */}
+        {/* Current Account Info Pill */}
         <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl flex items-center justify-between gap-3 mb-4">
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
@@ -186,7 +219,7 @@ export const BiometricEnrollModal: React.FC<BiometricEnrollModalProps> = ({
               {enrolledCred ? (
                 <>
                   <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                  Enrolled &amp; Locked
+                  Passkey Active
                 </>
               ) : (
                 <>
@@ -198,29 +231,38 @@ export const BiometricEnrollModal: React.FC<BiometricEnrollModalProps> = ({
           </div>
         </div>
 
-        {/* Finger Selection (During Enrollment) */}
+        {/* Role Isolation Note */}
+        <div className="p-2.5 bg-blue-50/70 border border-blue-200 rounded-xl mb-4 text-xs text-blue-900">
+          <div className="flex items-center gap-1.5 font-bold mb-0.5">
+            <Shield className="w-3.5 h-3.5 text-blue-700" />
+            <span>Role-Specific Credential Binding</span>
+          </div>
+          <p className="text-[11px] text-blue-800 leading-relaxed">
+            This biometric credential will be bound exclusively to your <strong>{currentUser.role === 'hod' ? 'HOD' : 'Faculty'}</strong> account. Cross-role authentication is strictly blocked.
+          </p>
+        </div>
+
+        {/* Finger / Passkey Label Selection */}
         {!enrolledCred ? (
           <div className="mb-4 text-left">
             <label className="block text-[11px] font-bold text-slate-700 mb-1.5 flex items-center gap-1">
               <Sliders className="w-3.5 h-3.5 text-sky-600" />
-              <span>Select Exact Finger to Bind to Account:</span>
+              <span>Select Fingerprint / Credential Label:</span>
             </label>
-            <div className="grid grid-cols-2 gap-2">
-              {(Object.keys(FINGER_LABELS) as FingerType[]).map((f) => (
+            <div className="grid grid-cols-1 gap-1.5">
+              {FINGER_OPTIONS.map((label) => (
                 <button
-                  key={f}
+                  key={label}
                   type="button"
-                  onClick={() => setSelectedFinger(f)}
-                  className={`p-2 rounded-xl text-left text-xs font-semibold border transition-all cursor-pointer ${
-                    selectedFinger === f
+                  onClick={() => setSelectedFingerLabel(label)}
+                  className={`p-2 rounded-xl text-left text-xs font-semibold border transition-all cursor-pointer flex items-center justify-between ${
+                    selectedFingerLabel === label
                       ? 'bg-sky-50 border-sky-500 text-sky-900 ring-2 ring-sky-200'
                       : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
                   }`}
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="truncate">{FINGER_LABELS[f]}</span>
-                    {selectedFinger === f && <Check className="w-3.5 h-3.5 text-sky-600 shrink-0" />}
-                  </div>
+                  <span>{label}</span>
+                  {selectedFingerLabel === label && <Check className="w-3.5 h-3.5 text-sky-600 shrink-0" />}
                 </button>
               ))}
             </div>
@@ -228,48 +270,18 @@ export const BiometricEnrollModal: React.FC<BiometricEnrollModalProps> = ({
         ) : (
           /* Enrolled Status Info & Hardware Sensor Test Bay */
           <div className="mb-4 p-3 bg-sky-50/60 border border-sky-200/70 rounded-2xl text-left">
-            <div className="flex items-center justify-between text-xs font-bold text-sky-900 mb-2">
+            <div className="flex items-center justify-between text-xs font-bold text-sky-900 mb-1.5">
               <span className="flex items-center gap-1.5">
                 <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                Active Hardware Binding:
+                Active Registered Passkey:
               </span>
               <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800">
-                {enrolledCred.fingerLabel}
+                {enrolledCred.fingerLabel || 'Biometric Passkey'}
               </span>
             </div>
-            
-            {/* Interactive Sensor Hardware Testing Bay */}
-            <div className="mt-2 pt-2 border-t border-sky-200/50">
-              <p className="text-[11px] font-bold text-slate-700 mb-1.5">
-                Test Hardware Sensor Security with Different Fingers:
-              </p>
-              <div className="grid grid-cols-2 gap-1.5">
-                {(Object.keys(FINGER_LABELS) as FingerType[]).map((f) => {
-                  const isEnrolledOne = f === enrolledCred.fingerType;
-                  return (
-                    <button
-                      key={f}
-                      type="button"
-                      disabled={enrollState === 'testing'}
-                      onClick={() => handleTestSensor(f)}
-                      className={`py-1.5 px-2.5 rounded-lg text-[11px] font-semibold flex items-center justify-between border transition-all cursor-pointer ${
-                        isEnrolledOne
-                          ? 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100 shadow-2xs'
-                          : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-rose-50 hover:border-rose-300 hover:text-rose-700'
-                      }`}
-                      title={isEnrolledOne ? 'Enrolled Finger (Will Pass)' : 'Unenrolled Finger (Will Fail with Access Denied)'}
-                    >
-                      <span className="truncate">{FINGER_LABELS[f].split(' ')[0]} {FINGER_LABELS[f].split(' ')[1]}</span>
-                      <span className={`text-[9px] font-mono font-bold px-1 rounded ${
-                        isEnrolledOne ? 'bg-emerald-200 text-emerald-900' : 'bg-slate-200 text-slate-600'
-                      }`}>
-                        {isEnrolledOne ? 'ENROLLED' : 'TEST'}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            <p className="text-[11px] text-slate-600">
+              Registered on: {new Date(enrolledCred.createdAt).toLocaleString()} &bull; Authenticator: {enrolledCred.deviceType || hardwareName}
+            </p>
           </div>
         )}
 
@@ -301,35 +313,28 @@ export const BiometricEnrollModal: React.FC<BiometricEnrollModalProps> = ({
             )}
           </div>
 
-          {/* Status Message & Match Score */}
+          {/* Status Message */}
           <div className="mt-3 min-h-[44px] flex flex-col items-center justify-center">
             {statusMessage ? (
-              <div className="space-y-1">
-                <p className={`text-xs font-semibold max-w-[320px] leading-snug ${
-                  enrollState === 'error' || enrollState === 'test-failed'
-                    ? 'text-rose-600 font-bold'
-                    : enrollState === 'success' || enrollState === 'test-success'
-                    ? 'text-emerald-700 font-bold'
-                    : 'text-sky-700'
-                }`}>
-                  {statusMessage}
-                </p>
-                {matchScore !== null && (
-                  <div className="text-[10px] font-mono text-slate-500">
-                    Sensor Biometric Score: <strong className={matchScore >= 0.85 ? 'text-emerald-600' : 'text-rose-600'}>{Math.round(matchScore * 100)}%</strong> (Enclave threshold &gt; 85%)
-                  </div>
-                )}
-              </div>
+              <p className={`text-xs font-semibold max-w-[320px] leading-snug ${
+                enrollState === 'error' || enrollState === 'test-failed'
+                  ? 'text-rose-600 font-bold'
+                  : enrollState === 'success' || enrollState === 'test-success'
+                  ? 'text-emerald-700 font-bold'
+                  : 'text-sky-700'
+              }`}>
+                {statusMessage}
+              </p>
             ) : enrolledCred ? (
               <div className="text-xs text-slate-600">
-                <span className="font-bold text-slate-800">{enrolledCred.fingerLabel}</span>
+                <span className="font-bold text-slate-800">{enrolledCred.fingerLabel || 'Biometric Passkey'}</span>
                 <div className="text-[11px] text-slate-500 mt-0.5 font-mono">
-                  Locked to {currentUser.name} on {enrolledCred.deviceType}
+                  Bound to {currentUser.name} ({currentUser.role.toUpperCase()})
                 </div>
               </div>
             ) : (
               <p className="text-xs text-slate-500 max-w-[280px]">
-                Hardware sensor will lock strictly to the selected finger. Any other finger will be rejected.
+                Click below to register your device's biometric sensor via WebAuthn.
               </p>
             )}
           </div>
@@ -338,47 +343,62 @@ export const BiometricEnrollModal: React.FC<BiometricEnrollModalProps> = ({
         {/* Action Buttons */}
         <div className="mt-4 space-y-2.5">
           {!enrolledCred ? (
-            <button
-              type="button"
-              onClick={handleEnroll}
-              disabled={enrollState === 'scanning'}
-              className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-sky-600 to-blue-700 hover:from-sky-700 hover:to-blue-800 active:scale-98 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-[0_4px_14px_rgba(2,132,199,0.35)] transition-all cursor-pointer"
-            >
-              <Fingerprint className="w-4 h-4" />
-              <span>{enrollState === 'scanning' ? 'Capturing Minutiae Enclave...' : `Enroll ${FINGER_LABELS[selectedFinger]}`}</span>
-            </button>
-          ) : (
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => handleTestSensor(enrolledCred.fingerType)}
-                disabled={enrollState === 'testing'}
-                className="py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
-              >
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Test Enrolled Finger</span>
-              </button>
+            <div className="space-y-2">
               <button
                 type="button"
                 onClick={handleEnroll}
                 disabled={enrollState === 'scanning'}
-                className="py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-sky-600 to-blue-700 hover:from-sky-700 hover:to-blue-800 active:scale-98 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-[0_4px_14px_rgba(2,132,199,0.35)] transition-all cursor-pointer"
               >
-                <RefreshCw className="w-3.5 h-3.5 text-slate-600" />
-                <span>Re-enroll</span>
+                <Fingerprint className="w-4 h-4" />
+                <span>{enrollState === 'scanning' ? 'Scanning Biometric Sensor...' : `Enroll Biometric for ${currentUser.role === 'hod' ? 'HOD' : 'Faculty'}`}</span>
+              </button>
+
+              {/* Clear Enrolled Fingerprint option beneath enroll button */}
+              <button
+                type="button"
+                onClick={handleClearAllForUser}
+                disabled={enrollState === 'scanning'}
+                className="w-full py-2.5 px-3 text-xs font-bold text-rose-600 hover:text-rose-700 hover:bg-rose-50/90 border border-rose-200/90 rounded-2xl transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95"
+                title="Wipe any previously stored biometric credentials for this account"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                <span>Clear Enrolled Fingerprint</span>
               </button>
             </div>
-          )}
+          ) : (
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={handleTestPasskey}
+                  disabled={enrollState === 'testing'}
+                  className="py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Test Passkey</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleEnroll}
+                  disabled={enrollState === 'scanning'}
+                  className="py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Re-enroll</span>
+                </button>
+              </div>
 
-          {enrolledCred && (
-            <button
-              type="button"
-              onClick={handleRemove}
-              className="w-full py-2 px-3 text-[11px] font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-1"
-            >
-              <Trash2 className="w-3 h-3" />
-              <span>Wipe Fingerprint from Hardware Enclave</span>
-            </button>
+              {/* Clear Enrolled Fingerprint option beneath enroll / test buttons */}
+              <button
+                type="button"
+                onClick={handleClearAllForUser}
+                className="w-full py-2.5 px-3 text-xs font-bold text-rose-600 hover:text-rose-700 bg-rose-50/80 hover:bg-rose-100 border border-rose-200/90 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                <span>Clear Enrolled Fingerprint</span>
+              </button>
+            </div>
           )}
         </div>
 
@@ -388,7 +408,7 @@ export const BiometricEnrollModal: React.FC<BiometricEnrollModalProps> = ({
             <Cpu className="w-3 h-3 text-slate-400" />
             <span>{hardwareName}</span>
           </div>
-          <span className="font-bold text-emerald-700">AES-256 HMAC Enclave</span>
+          <span className="font-bold text-emerald-700">FIDO2 / WebAuthn Server-Verified</span>
         </div>
 
       </div>

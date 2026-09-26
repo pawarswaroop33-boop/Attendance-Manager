@@ -17,7 +17,6 @@ import {
 } from 'lucide-react';
 import { ClassGroup, AuthUser, SystemSettings } from '../types';
 import { DYPatilLogo } from './DYPatilLogo';
-import { biometricService } from '../services/biometricService';
 
 export type AppTab = 'dashboard' | 'timetable' | 'defaulters' | 'analytics' | 'students' | 'hod';
 
@@ -68,7 +67,7 @@ export const Header: React.FC<HeaderProps> = ({
   activeDbProvider = 'Supabase'
 }) => {
   const currentClass = classes.find(c => c.id === selectedClassId) || classes[0];
-  const isBiometricEnrolled = biometricService.isUserEnrolled(currentUser.uniqueCode || currentUser.id);
+
 
   const handleSetToday = () => {
     const today = new Date();

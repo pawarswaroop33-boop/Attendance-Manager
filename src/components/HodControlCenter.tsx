@@ -50,7 +50,7 @@ import {
 } from '../types';
 import { dbService } from '../services/databaseService';
 import { sha256Hex, evaluatePasswordStrength, sanitizeUsername } from '../utils/crypto';
-import { biometricService } from '../services/biometricService';
+import { webauthnService } from '../services/webauthnService';
 import { AttendanceCalendar } from './AttendanceCalendar';
 import { formatDateShort } from '../utils/dateUtils';
 
@@ -219,7 +219,19 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
 
   // Biometric status
-  const isHodBiometricEnrolled = biometricService.isUserEnrolled(settings.hodUsername || 'dyp') || biometricService.isUserEnrolled('dyp') || biometricService.isUserEnrolled('hod');
+  const [isHodBiometricEnrolled, setIsHodBiometricEnrolled] = useState(false);
+
+  useEffect(() => {
+    const checkHodEnroll = async () => {
+      try {
+        const list = await webauthnService.getCredentials(undefined, 'hod');
+        setIsHodBiometricEnrolled(list.length > 0);
+      } catch {
+        setIsHodBiometricEnrolled(false);
+      }
+    };
+    checkHodEnroll();
+  }, [settings.hodUsername]);
 
   // Synchronize settings
   useEffect(() => {
@@ -1876,14 +1888,32 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
                   </strong>
                 </p>
                 {onOpenBiometrics && (
-                  <button
-                    type="button"
-                    onClick={onOpenBiometrics}
-                    className="w-full py-2.5 rounded-2xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <Fingerprint className="w-4 h-4 text-emerald-600" />
-                    <span>{isHodBiometricEnrolled ? 'Manage Biometric Key' : 'Enroll Fingerprint / Face ID'}</span>
-                  </button>
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={onOpenBiometrics}
+                      className="w-full py-2.5 rounded-2xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Fingerprint className="w-4 h-4 text-emerald-600" />
+                      <span>{isHodBiometricEnrolled ? 'Manage / Test Biometric Key' : 'Enroll Fingerprint / Face ID'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const ok = await webauthnService.clearCredentials(undefined, 'hod');
+                        if (ok.success) {
+                          setIsHodBiometricEnrolled(false);
+                          setCredentialSuccess('HOD enrolled biometric fingerprints cleared successfully.');
+                          setTimeout(() => setCredentialSuccess(''), 4000);
+                        }
+                      }}
+                      className="w-full py-2 rounded-xl text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-rose-200 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                      <span>Clear Enrolled Fingerprint</span>
+                    </button>
+                  </div>
                 )}
               </div>
             </div>

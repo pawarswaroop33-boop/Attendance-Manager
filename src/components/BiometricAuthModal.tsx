@@ -9,9 +9,11 @@ import {
   Lock, 
   UserCheck, 
   ShieldCheck,
-  KeyRound
+  KeyRound,
+  GraduationCap,
+  Shield
 } from 'lucide-react';
-import { biometricService, BiometricCredential, FingerType, FINGER_LABELS } from '../services/biometricService';
+import { webauthnService, RegisteredCredentialInfo } from '../services/webauthnService';
 import { AuthUser, Teacher, SystemSettings } from '../types';
 
 interface BiometricAuthModalProps {
@@ -35,173 +37,122 @@ export const BiometricAuthModal: React.FC<BiometricAuthModalProps> = ({
 }) => {
   const [scanState, setScanState] = useState<'idle' | 'scanning' | 'success' | 'not-enrolled' | 'unauthorized' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
-  const [hardwareName, setHardwareName] = useState('Hardware Biometric Sensor');
-  const [targetCredential, setTargetCredential] = useState<BiometricCredential | null>(null);
-  const [verifiedTeacher, setVerifiedTeacher] = useState<{ name: string; id: string; role: 'teacher' | 'hod' } | null>(null);
-  const [matchScore, setMatchScore] = useState<number | null>(null);
+  const [hardwareName, setHardwareName] = useState('Hardware Platform Authenticator');
+  const [enrolledCredentials, setEnrolledCredentials] = useState<RegisteredCredentialInfo[]>([]);
+  const [verifiedUser, setVerifiedUser] = useState<AuthUser | null>(null);
+  const [isLoadingList, setIsLoadingList] = useState(false);
 
+  const roleTitle = activeRoleMode === 'hod' ? 'HOD / Department Head' : 'Faculty Member';
+
+  // Load enrolled credentials for this role from the server
   useEffect(() => {
     if (isOpen) {
-      setHardwareName(biometricService.getBiometricHardwareName());
+      setHardwareName(webauthnService.getHardwareName());
       setErrorMessage('');
-      setVerifiedTeacher(null);
-      setMatchScore(null);
-      
-      const allEnrolled = biometricService.getRegisteredCredentials();
+      setVerifiedUser(null);
+      setScanState('idle');
+      setIsLoadingList(true);
 
-      if (allEnrolled.length === 0) {
-        setScanState('not-enrolled');
-        setTargetCredential(null);
-      } else {
-        const cleanEntered = enteredUsername.trim().toUpperCase();
-        const isHodMode = activeRoleMode === 'hod' || cleanEntered === 'DYP' || cleanEntered === 'HOD';
+      const fetchCreds = async () => {
+        try {
+          const list = await webauthnService.getCredentials(
+            enteredUsername ? enteredUsername.trim() : undefined,
+            activeRoleMode
+          );
+          setEnrolledCredentials(list);
 
-        if (isHodMode) {
-          const hodEnrolled = allEnrolled.find(c => 
-            c.role === 'hod' || 
-            c.userId.toLowerCase() === (settings.hodUsername || 'dyp').toLowerCase() ||
-            c.userId.toLowerCase() === 'dyp' || 
-            c.userId.toLowerCase() === 'hod'
-          );
-          if (!hodEnrolled) {
+          if (list.length === 0) {
             setScanState('not-enrolled');
-            setTargetCredential(null);
-            setErrorMessage('HOD has not enrolled a biometric fingerprint on this system yet.');
-            return;
+            setErrorMessage(
+              activeRoleMode === 'hod'
+                ? 'The HOD account does not have a biometric credential enrolled yet. Please log in with password to enroll.'
+                : enteredUsername
+                ? `Faculty ID "${enteredUsername}" has not enrolled a biometric credential yet.`
+                : 'No Faculty biometric credentials have been enrolled yet. Please log in with your Faculty ID and password to enroll.'
+            );
+          } else {
+            setScanState('idle');
+            // Automatically prompt the device biometric sensor
+            handleBiometricUnlock();
           }
-          setTargetCredential(hodEnrolled);
-        } else if (cleanEntered) {
-          const specificEnrolled = allEnrolled.find(c => 
-            c.userId.trim().toUpperCase() === cleanEntered ||
-            c.userId.replace(/^TEACH/i, '').trim().toUpperCase() === cleanEntered.replace(/^TEACH/i, '').trim().toUpperCase()
-          );
-          if (!specificEnrolled) {
-            setScanState('not-enrolled');
-            setTargetCredential(null);
-            setErrorMessage(`Faculty ID "${enteredUsername}" has not enrolled a biometric fingerprint on this system yet.`);
-            return;
-          }
-          setTargetCredential(specificEnrolled);
-        } else {
-          setTargetCredential(allEnrolled[0]);
+        } catch {
+          setScanState('error');
+          setErrorMessage('Failed to connect to authentication service.');
+        } finally {
+          setIsLoadingList(false);
         }
+      };
 
-        setScanState('idle');
-        handleHardwareBiometricScan();
-      }
+      fetchCreds();
     }
   }, [isOpen, enteredUsername, activeRoleMode]);
 
   if (!isOpen) return null;
 
-  const handleHardwareBiometricScan = async (fingerOverride?: FingerType) => {
+  const handleBiometricUnlock = async () => {
     setScanState('scanning');
     setErrorMessage('');
-    setMatchScore(null);
-
-    // Minor tactile scan delay
-    await new Promise(r => setTimeout(r, 450));
 
     try {
-      const cleanEntered = enteredUsername.trim();
-      const result = await biometricService.verifyEnrolledHardwareBiometric(cleanEntered || undefined, fingerOverride);
+      const cleanUser = enteredUsername.trim();
+      const result = await webauthnService.authenticateBiometric(
+        activeRoleMode,
+        cleanUser || undefined
+      );
 
-      if (!result.enrolled) {
-        setScanState('not-enrolled');
-        setErrorMessage(result.message);
-        return;
-      }
-
-      if (result.success && result.credential) {
-        const cred = result.credential;
-
-        // Security check: If in HOD mode, ensure scanned finger belongs to HOD
-        if (activeRoleMode === 'hod' && cred.role !== 'hod') {
+      if (result.success && result.user) {
+        // STRICT ROLE ISOLATION: Confirm the role returned by the server matches active role
+        if (result.user.role !== activeRoleMode) {
           setScanState('unauthorized');
-          setErrorMessage('Access Denied: Scanned fingerprint belongs to a faculty member, not the HOD.');
+          setErrorMessage(`Access Denied: Biometric credential belongs to ${result.user.role.toUpperCase()}, not ${activeRoleMode.toUpperCase()}. Cross-role authentication is strictly prohibited.`);
           return;
         }
 
-        // Security check: If specific Faculty ID entered, ensure scanned finger matches that faculty
-        if (activeRoleMode === 'teacher' && cleanEntered && cleanEntered.toUpperCase() !== 'DYP') {
-          const credUpper = cred.userId.trim().toUpperCase();
-          const cleanEnteredUpper = cleanEntered.toUpperCase();
-          const isMatch = (
-            credUpper === cleanEnteredUpper ||
-            cred.userId.replace(/^TEACH/i, '').trim().toUpperCase() === cleanEntered.replace(/^TEACH/i, '').trim().toUpperCase()
+        // Complete faculty roster matching if teacher
+        let fullUser: AuthUser = result.user;
+        if (result.user.role === 'teacher') {
+          const matched = teachers.find(
+            t => t.uniqueCode.toUpperCase() === result.user!.uniqueCode?.toUpperCase() ||
+                 t.id.toLowerCase() === result.user!.id.toLowerCase()
           );
-          if (!isMatch) {
-            setScanState('unauthorized');
-            setErrorMessage(`Access Denied: Fingerprint belongs to ${cred.userName} (${cred.userId}), not "${enteredUsername}".`);
-            return;
+          if (matched) {
+            fullUser = {
+              ...result.user,
+              name: matched.name,
+              department: matched.department,
+              assignedSubjects: matched.subjects,
+              assignedClasses: matched.assignedClasses
+            };
           }
         }
 
-        setMatchScore(result.matchScore || 0.98);
-        setVerifiedTeacher({
-          name: cred.userName,
-          id: cred.userId,
-          role: cred.role
-        });
-        triggerSuccess(cred);
-      } else {
-        // STRICT: Unrecognized fingerprint is rejected
-        setScanState('unauthorized');
-        setMatchScore(result.matchScore || 0.12);
-        setErrorMessage(result.message || 'Access Denied: Unrecognized fingerprint. Hardware enclave rejected the scan.');
+        setVerifiedUser(fullUser);
+        setScanState('success');
+
         if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-          try { navigator.vibrate([100, 50, 100, 50, 100]); } catch {}
+          try { navigator.vibrate([50, 60, 50]); } catch {}
+        }
+
+        // Redirect to appropriate dashboard after short tactile confirmation
+        setTimeout(() => {
+          onLoginSuccess(fullUser);
+          onClose();
+        }, 900);
+      } else {
+        setScanState('unauthorized');
+        setErrorMessage(result.message || 'Access Denied: Biometric authentication failed.');
+        if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+          try { navigator.vibrate([100, 50, 100]); } catch {}
         }
       }
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Biometric hardware rejected the scan.';
+    } catch (e: any) {
       setScanState('unauthorized');
-      setErrorMessage(`Access Denied: ${msg}. Only enrolled faculty fingerprint is authorized.`);
+      setErrorMessage(e.message || 'Biometric hardware sensor rejected the scan.');
     }
   };
-
-  const triggerSuccess = (cred: BiometricCredential) => {
-    setScanState('success');
-    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-      try { navigator.vibrate([50, 60, 50]); } catch {}
-    }
-
-    setTimeout(() => {
-      if (cred.role === 'hod') {
-        onLoginSuccess({
-          role: 'hod',
-          id: 'hod-1',
-          name: settings.hodName || 'Prof. Prashant Kathole',
-          uniqueCode: settings.hodUsername || 'dyp',
-          department: settings.departmentName,
-          email: 'hod.ece@dypatil.edu'
-        });
-      } else {
-        // Match teacher in registered roster
-        const matchedTeacher = teachers.find(
-          t => t.uniqueCode.toUpperCase() === cred.userId.toUpperCase() ||
-               t.id.toLowerCase() === cred.userId.toLowerCase() ||
-               t.name.toLowerCase() === cred.userName.toLowerCase()
-        ) || teachers[0];
-
-        onLoginSuccess({
-          role: 'teacher',
-          id: matchedTeacher.id,
-          name: matchedTeacher.name,
-          uniqueCode: matchedTeacher.uniqueCode,
-          department: matchedTeacher.department,
-          email: matchedTeacher.email,
-          assignedSubjects: matchedTeacher.subjects,
-          assignedClasses: matchedTeacher.assignedClasses
-        });
-      }
-    }, 900);
-  };
-
-  const enrolledCount = biometricService.getRegisteredCredentials().length;
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 bg-slate-900/65 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
       <div className="bg-white rounded-3xl max-w-sm w-full p-6 sm:p-7 shadow-2xl border border-sky-100 text-slate-800 text-center relative overflow-hidden animate-in zoom-in-95 duration-200">
         
         {/* Close Button */}
@@ -231,13 +182,26 @@ export const BiometricAuthModal: React.FC<BiometricAuthModalProps> = ({
         </div>
 
         <h3 className="text-lg font-extrabold text-slate-900 tracking-tight">
-          Hardware Biometric Enclave
+          WebAuthn Biometric Unlock
         </h3>
-        <p className="text-xs text-slate-500 mt-1 max-w-[260px] mx-auto">
+
+        {/* Role Targeting Badge */}
+        <div className="mt-1.5 flex items-center justify-center gap-1.5">
+          <span className={`inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${
+            activeRoleMode === 'hod'
+              ? 'bg-amber-50 border-amber-200 text-amber-900'
+              : 'bg-sky-50 border-sky-200 text-sky-900'
+          }`}>
+            {activeRoleMode === 'hod' ? <Shield className="w-3 h-3 text-amber-600" /> : <GraduationCap className="w-3 h-3 text-sky-600" />}
+            Authenticating as: <strong>{roleTitle}</strong>
+          </span>
+        </div>
+
+        <p className="text-xs text-slate-500 mt-2 max-w-[270px] mx-auto leading-relaxed">
           {scanState === 'not-enrolled'
-            ? 'No fingerprint registered on this device'
+            ? 'No biometric passkey enrolled for this role'
             : scanState === 'unauthorized'
-            ? 'Strict Hardware Protection Active'
+            ? 'Strict Hardware Verification & Role Protection Active'
             : `Hardware verification via ${hardwareName}`}
         </p>
 
@@ -246,20 +210,20 @@ export const BiometricAuthModal: React.FC<BiometricAuthModalProps> = ({
           <div className="my-5 p-4 rounded-2xl bg-amber-50/70 border border-amber-200 text-left space-y-2">
             <div className="flex items-center gap-2 text-amber-800 font-bold text-xs">
               <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-              <span>Enrollment Required</span>
+              <span>Enrollment Required for {activeRoleMode === 'hod' ? 'HOD' : 'Faculty'}</span>
             </div>
-            <p className="text-[11px] text-amber-700 leading-relaxed">
-              {errorMessage || 'Each teacher has an enrollment option inside their portal.'}
+            <p className="text-[11px] text-amber-800 leading-relaxed">
+              {errorMessage}
             </p>
-            <p className="text-[11px] text-slate-600 pt-1">
-              <strong>How to enroll:</strong>
+            <div className="text-[11px] text-slate-600 pt-1 border-t border-amber-200/60 mt-2">
+              <strong>How to enroll your biometric passkey:</strong>
               <br />
-              1. Sign in using your Faculty ID and password.
+              1. Sign in using your {activeRoleMode === 'hod' ? 'HOD' : 'Faculty'} password.
               <br />
-              2. Click <span className="font-bold text-slate-800">"Biometric ID"</span> in your portal tab.
+              2. Click <span className="font-bold text-slate-900">"Biometric ID"</span> in the portal.
               <br />
-              3. Scan your finger once to bind it permanently to your hardware enclave.
-            </p>
+              3. Scan your fingerprint to create a secure device passkey.
+            </div>
             <button
               type="button"
               onClick={onClose}
@@ -269,21 +233,21 @@ export const BiometricAuthModal: React.FC<BiometricAuthModalProps> = ({
             </button>
           </div>
         ) : (
-          /* State 2 & 3: SCANNING / UNAUTHORIZED / SUCCESS */
+          /* State 2: SCANNING / UNAUTHORIZED / SUCCESS */
           <div className="my-4 flex flex-col items-center justify-center">
             
-            {/* Target Account Badge */}
-            {targetCredential && (
+            {/* Registered Credential Pill */}
+            {enrolledCredentials.length > 0 && (
               <div className="mb-3 py-1 px-3 bg-slate-100 rounded-full border border-slate-200 text-[11px] text-slate-700 font-semibold flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                <span>Enrolled: <strong>{targetCredential.userName}</strong> ({targetCredential.fingerLabel})</span>
+                <span>Enrolled: <strong>{enrolledCredentials[0].userName}</strong> ({enrolledCredentials[0].fingerLabel || 'Passkey'})</span>
               </div>
             )}
 
             {/* Sensor Scanner Circle */}
             <button
               type="button"
-              onClick={() => handleHardwareBiometricScan()}
+              onClick={handleBiometricUnlock}
               disabled={scanState === 'scanning' || scanState === 'success'}
               className={`relative w-24 h-24 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer select-none ${
                 scanState === 'scanning'
@@ -306,61 +270,59 @@ export const BiometricAuthModal: React.FC<BiometricAuthModalProps> = ({
               )}
             </button>
 
-            {/* Status Label & Alerts */}
-            <div className="mt-3.5 min-h-[44px] flex flex-col items-center justify-center">
+            {/* Status Feedback */}
+            <div className="mt-3.5 min-h-[44px] flex flex-col items-center justify-center text-center">
               {scanState === 'scanning' && (
                 <span className="text-sky-600 text-xs font-bold inline-flex items-center gap-1.5 animate-pulse">
                   <span className="w-2 h-2 rounded-full bg-sky-500 animate-ping" />
-                  Reading fingerprint on hardware sensor...
+                  Prompting hardware biometric sensor...
                 </span>
               )}
-              {scanState === 'success' && verifiedTeacher && (
+              {scanState === 'success' && verifiedUser && (
                 <div className="text-emerald-700 text-xs font-bold flex flex-col items-center">
                   <span className="inline-flex items-center gap-1">
-                    <UserCheck className="w-3.5 h-3.5" /> Enrolled Fingerprint Verified!
+                    <UserCheck className="w-3.5 h-3.5" /> Biometric Identity Verified!
                   </span>
                   <span className="text-[11px] text-emerald-800 font-semibold mt-0.5">
-                    Unlocking portal for {verifiedTeacher.name}...
+                    Unlocking {verifiedUser.role === 'hod' ? 'HOD Control Center' : 'Faculty Portal'} for {verifiedUser.name}...
                   </span>
                 </div>
               )}
               {scanState === 'unauthorized' && (
                 <div className="text-rose-600 text-xs font-bold max-w-[280px] text-center leading-snug">
-                  <p>{errorMessage || 'Access Denied: Unrecognized fingerprint.'}</p>
-                  <p className="text-[11px] text-slate-500 font-normal mt-1">
-                    No other fingerprint is allowed. Only the enrolled finger is permitted.
-                  </p>
+                  <p>{errorMessage || 'Access Denied: Biometric verification rejected.'}</p>
                 </div>
               )}
               {scanState === 'idle' && (
                 <span className="text-slate-500 text-xs font-medium">
-                  Tap sensor button to verify hardware fingerprint
+                  Tap sensor circle to initiate biometric unlock
                 </span>
               )}
             </div>
 
-            {/* Retry / Alternate Scan */}
+            {/* Retry Button */}
             {scanState === 'unauthorized' && (
               <button
                 type="button"
-                onClick={() => handleHardwareBiometricScan()}
+                onClick={handleBiometricUnlock}
                 className="mt-2 py-2 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs cursor-pointer transition-all active:scale-95 shadow-2xs"
               >
-                Scan Enrolled Finger Again
+                Scan Biometric Again
               </button>
             )}
 
           </div>
         )}
 
-        {/* Security Notice */}
+        {/* Security Notice Footer */}
         <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-400">
           <div className="flex items-center gap-1">
             <Cpu className="w-3 h-3 text-slate-400" />
-            <span>Hardware Enclave</span>
+            <span>FIDO2 / WebAuthn</span>
           </div>
-          <span className="font-bold text-slate-600">
-            {enrolledCount} Faculty Fingerprint{enrolledCount !== 1 ? 's' : ''} Locked
+          <span className="font-bold text-emerald-700 flex items-center gap-1">
+            <ShieldCheck className="w-3 h-3" />
+            Server Cryptographic Verified
           </span>
         </div>
 

@@ -84,6 +84,8 @@ export interface AttendanceSession {
   records: Record<string, AttendanceRecord>; // studentId -> AttendanceRecord
   lastUpdated: string;
   remarks?: string;
+  isRegistered?: boolean;
+  isRealSession?: boolean;
 }
 
 export interface ClassGroup {

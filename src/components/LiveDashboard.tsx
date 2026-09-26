@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Check, 
   X, 
@@ -29,14 +29,15 @@ import {
   GraduationCap,
   Fingerprint,
   Hash,
-  Send
+  Send,
+  Trash2
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { AttendanceSession, ClassGroup, Student, AttendanceStatus, AuthUser, TimetableSlot } from '../types';
 import { generateParentAlertMessage, shareToWhatsApp } from '../utils/whatsapp';
 import { formatDateWithDay, formatDateShort, getDayOfWeek } from '../utils/dateUtils';
 import { getNextLectureDateForUser } from '../utils/teacherFilter';
-import { biometricService } from '../services/biometricService';
+import { webauthnService } from '../services/webauthnService';
 
 interface LiveDashboardProps {
   session: AttendanceSession;
@@ -93,14 +94,21 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
   const [manualRollInput, setManualRollInput] = useState('');
   const [rollFeedback, setRollFeedback] = useState<{ message: string; type: 'success' | 'error'; student?: Student } | null>(null);
 
-  // Check if current faculty has enrolled their biometric on this browser
-  const isTeacherBiometricEnrolled = useMemo(() => {
-    if (!currentUser) return false;
-    return (
-      (currentUser.uniqueCode && biometricService.isUserEnrolled(currentUser.uniqueCode)) ||
-      biometricService.isUserEnrolled(currentUser.id) ||
-      biometricService.isUserEnrolled(currentUser.name)
-    );
+  const [isTeacherBiometricEnrolled, setIsTeacherBiometricEnrolled] = useState(false);
+
+  // Check if current faculty has enrolled their biometric on this system
+  useEffect(() => {
+    if (!currentUser) return;
+    const checkEnroll = async () => {
+      try {
+        const userId = currentUser.uniqueCode || currentUser.id;
+        const list = await webauthnService.getCredentials(userId, 'teacher');
+        setIsTeacherBiometricEnrolled(list.length > 0);
+      } catch {
+        setIsTeacherBiometricEnrolled(false);
+      }
+    };
+    checkEnroll();
   }, [currentUser]);
 
   const dayOfWeek = getDayOfWeek(selectedDate);
@@ -482,15 +490,34 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
             )}
 
             {currentUser?.role === 'teacher' && onOpenBiometrics && (
-              <button
-                type="button"
-                onClick={onOpenBiometrics}
-                className="px-3.5 py-2.5 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
-                title="Manage personal biometric fingerprint"
-              >
-                <Fingerprint className="w-4 h-4 text-sky-600" />
-                <span>{isTeacherBiometricEnrolled ? 'Biometric ID Active' : 'Enroll My Fingerprint'}</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onOpenBiometrics}
+                  className="px-3.5 py-2.5 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
+                  title="Manage personal biometric fingerprint"
+                >
+                  <Fingerprint className="w-4 h-4 text-sky-600" />
+                  <span>{isTeacherBiometricEnrolled ? 'Biometric ID Active' : 'Enroll My Fingerprint'}</span>
+                </button>
+                {isTeacherBiometricEnrolled && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const userId = currentUser.uniqueCode || currentUser.id;
+                      const res = await webauthnService.clearCredentials(userId, 'teacher');
+                      if (res.success) {
+                        setIsTeacherBiometricEnrolled(false);
+                      }
+                    }}
+                    className="px-3 py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold transition-all flex items-center gap-1 cursor-pointer active:scale-95"
+                    title="Clear enrolled fingerprint"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                    <span>Clear Fingerprint</span>
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </div>

@@ -32,7 +32,8 @@ import { HodControlCenter } from './components/HodControlCenter';
 import { ImportStudentsModal } from './components/ImportStudentsModal';
 import { WhatsAppShareModal } from './components/WhatsAppShareModal';
 import { BiometricEnrollModal } from './components/BiometricEnrollModal';
-import { getDayOfWeek } from './utils/dateUtils';
+import { getDayOfWeek, isLegacyDummySession } from './utils/dateUtils';
+import { authService } from './services/authService';
 import { 
   isSlotBelongsToTeacher, 
   isSessionBelongsToTeacher, 
@@ -177,20 +178,27 @@ export default function App() {
     return INITIAL_STUDENTS;
   });
 
-  // 8. Attendance Sessions
+  // 8. Attendance Sessions (Starts empty by default so zero lectures are shown until created)
   const [sessions, setSessions] = useState<AttendanceSession[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_SESSIONS);
       if (saved !== null) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          return parsed;
+          // Filter out any legacy dummy auto-generated sessions
+          const cleaned = parsed.filter(s => !isLegacyDummySession(s));
+          if (cleaned.length !== parsed.length) {
+            try {
+              localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(cleaned));
+            } catch (_) {}
+          }
+          return cleaned;
         }
       }
     } catch (e) {
       console.error('Failed to load sessions', e);
     }
-    return generateInitialSessions(INITIAL_CLASSES, INITIAL_STUDENTS);
+    return [];
   });
 
   // Active UI Navigation & Selection State
@@ -201,10 +209,12 @@ export default function App() {
     return 'slot-mon-1';
   });
 
-  // HOD Role Guard: HOD must never have access to take live attendance
+  // Strict Role Guard: Non-HOD users can NEVER access 'hod' tab, and HOD role never takes live attendance
   useEffect(() => {
     if (currentUser?.role === 'hod' && currentTab === 'dashboard') {
       setCurrentTab('hod');
+    } else if (currentUser && currentUser.role !== 'hod' && currentTab === 'hod') {
+      setCurrentTab('dashboard');
     }
   }, [currentUser, currentTab]);
 
@@ -276,6 +286,7 @@ export default function App() {
   const handleLogout = () => {
     setCurrentUser(null);
     setCurrentTab('dashboard');
+    authService.clearSession();
     try {
       localStorage.removeItem(STORAGE_KEY_AUTH);
       sessionStorage.clear();
@@ -347,7 +358,44 @@ export default function App() {
           if (cloudState.teachers && cloudState.teachers.length > 0) setTeachers(cloudState.teachers);
           if (cloudState.classrooms && cloudState.classrooms.length > 0) setClassrooms(cloudState.classrooms);
           if (cloudState.timetable && cloudState.timetable.length > 0) setTimetable(cloudState.timetable);
-          if (cloudState.sessions && cloudState.sessions.length > 0) setSessions(cloudState.sessions);
+          
+          // Non-destructively merge clean local real sessions with clean cloud real sessions
+          const cleanLocalSessions = (sessions || []).filter(s => !isLegacyDummySession(s));
+          const cleanCloudSessions = (cloudState.sessions || []).filter(s => !isLegacyDummySession(s));
+
+          const sessionMap = new Map<string, AttendanceSession>();
+          cleanLocalSessions.forEach(s => {
+            const key = s.id || `${s.classId}_${s.date}_${s.lectureSlotId || 'general'}`;
+            sessionMap.set(key, s);
+          });
+          cleanCloudSessions.forEach(s => {
+            const key = s.id || `${s.classId}_${s.date}_${s.lectureSlotId || 'general'}`;
+            const existing = sessionMap.get(key);
+            if (!existing) {
+              sessionMap.set(key, s);
+            } else {
+              const existingTime = existing.lastUpdated ? new Date(existing.lastUpdated).getTime() : 0;
+              const incomingTime = s.lastUpdated ? new Date(s.lastUpdated).getTime() : 0;
+              if (incomingTime >= existingTime) {
+                sessionMap.set(key, s);
+              }
+            }
+          });
+          const mergedSessions = Array.from(sessionMap.values());
+          setSessions(mergedSessions);
+
+          // If the cloud state contained dummy sessions or local had newer sessions, sync the merged real sessions
+          const hadDummySessions = Boolean(cloudState.sessions && cloudState.sessions.some(s => isLegacyDummySession(s)));
+          const hadMissingRealSessions = mergedSessions.length > cleanCloudSessions.length;
+          if (hadDummySessions || hadMissingRealSessions) {
+            try {
+              dbService.saveEntireCampusState({
+                ...cloudState,
+                sessions: mergedSessions
+              }).catch(() => {});
+            } catch (_) {}
+          }
+
           setTimeout(() => {
             isRemoteUpdateRef.current = false;
           }, 300);
@@ -363,7 +411,7 @@ export default function App() {
               teachers,
               classrooms,
               timetable,
-              sessions
+              sessions: sessions.filter(s => !isLegacyDummySession(s))
             });
             showToast(`Synchronized all ${currentLocalStudentsCount} students with cloud!`, 'success');
           } catch (e) {
@@ -381,7 +429,31 @@ export default function App() {
             if (incoming.teachers) setTeachers(incoming.teachers);
             if (incoming.classrooms) setClassrooms(incoming.classrooms);
             if (incoming.timetable) setTimetable(incoming.timetable);
-            if (incoming.sessions) setSessions(incoming.sessions);
+            if (incoming.sessions) {
+              const cleanIncoming = incoming.sessions.filter(s => !isLegacyDummySession(s));
+              setSessions(prevLocal => {
+                const cleanPrev = prevLocal.filter(s => !isLegacyDummySession(s));
+                const mergedMap = new Map<string, AttendanceSession>();
+                cleanPrev.forEach(s => {
+                  const key = s.id || `${s.classId}_${s.date}_${s.lectureSlotId || 'general'}`;
+                  mergedMap.set(key, s);
+                });
+                cleanIncoming.forEach(s => {
+                  const key = s.id || `${s.classId}_${s.date}_${s.lectureSlotId || 'general'}`;
+                  const existing = mergedMap.get(key);
+                  if (!existing) {
+                    mergedMap.set(key, s);
+                  } else {
+                    const existingTime = existing.lastUpdated ? new Date(existing.lastUpdated).getTime() : 0;
+                    const incomingTime = s.lastUpdated ? new Date(s.lastUpdated).getTime() : 0;
+                    if (incomingTime >= existingTime) {
+                      mergedMap.set(key, s);
+                    }
+                  }
+                });
+                return Array.from(mergedMap.values());
+              });
+            }
             setTimeout(() => {
               isRemoteUpdateRef.current = false;
             }, 300);
@@ -649,7 +721,9 @@ export default function App() {
           ...session,
           dayOfWeek: session.dayOfWeek || getDayOfWeek(selectedDate),
           records: updatedRecords,
-          lastUpdated: timestamp
+          lastUpdated: timestamp,
+          isRegistered: true,
+          isRealSession: true
         };
 
         const next = [...prevSessions];
@@ -688,7 +762,9 @@ export default function App() {
           subject: effectiveSubject,
           records: newRecords,
           lastUpdated: timestamp,
-          remarks: ''
+          remarks: '',
+          isRegistered: true,
+          isRealSession: true
         };
 
         return [...prevSessions, newSession];
@@ -733,7 +809,9 @@ export default function App() {
           ...session,
           dayOfWeek: session.dayOfWeek || getDayOfWeek(selectedDate),
           records: updatedRecords,
-          lastUpdated: timestamp
+          lastUpdated: timestamp,
+          isRegistered: true,
+          isRealSession: true
         };
         const next = [...prevSessions];
         next[sessionIndex] = updatedSession;
@@ -756,7 +834,9 @@ export default function App() {
           subject: effectiveSubject,
           records: updatedRecords,
           lastUpdated: timestamp,
-          remarks: ''
+          remarks: '',
+          isRegistered: true,
+          isRealSession: true
         };
         return [...prevSessions, newSession];
       }
@@ -815,7 +895,9 @@ export default function App() {
           ...session,
           dayOfWeek: session.dayOfWeek || getDayOfWeek(selectedDate),
           records: updatedRecords,
-          lastUpdated: timestamp
+          lastUpdated: timestamp,
+          isRegistered: true,
+          isRealSession: true
         };
         const next = [...prevSessions];
         next[sessionIndex] = updatedSession;
@@ -838,7 +920,9 @@ export default function App() {
           subject: effectiveSubject,
           records: updatedRecords,
           lastUpdated: timestamp,
-          remarks: ''
+          remarks: '',
+          isRegistered: true,
+          isRealSession: true
         };
         return [...prevSessions, newSession];
       }
@@ -1051,7 +1135,9 @@ export default function App() {
     const sessionToSave: AttendanceSession = {
       ...currentSession,
       dayOfWeek: currentSession.dayOfWeek || sessionDay,
-      lastUpdated: timestamp
+      lastUpdated: timestamp,
+      isRegistered: true,
+      isRealSession: true
     };
 
     const nextSessions = [...sessions];

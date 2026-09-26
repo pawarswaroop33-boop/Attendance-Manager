@@ -40,6 +40,20 @@ export const formatDateKey = (year: number, monthIndex: number, day: number): st
 /**
  * Parses YYYY-MM-DD to year, monthIndex (0-11), and day (1-31)
  */
+export const isLegacyDummySession = (session: any): boolean => {
+  if (!session || typeof session !== 'object') return false;
+  // If explicitly flagged as registered/real by user actions, never treat as dummy
+  if (session.isRegistered === true || session.isRealSession === true) {
+    return false;
+  }
+  const remarks = String(session.remarks || '');
+  // Specifically matches old mock auto-generator remarks template
+  if (remarks.startsWith('Conducted lecture on') && remarks.includes('for Electronics and Computer Engineering.')) {
+    return true;
+  }
+  return false;
+};
+
 export const parseDateKey = (dateStr: string): { year: number; monthIndex: number; day: number } => {
   if (!dateStr) {
     const now = new Date();

@@ -20,6 +20,7 @@ import {
   TimetableSlot, 
   SystemSettings 
 } from '../types';
+import { isLegacyDummySession } from '../utils/dateUtils';
 
 const COLLECTION_SNAPSHOT = 'campus_state';
 const DOC_SNAPSHOT = 'current';
@@ -148,6 +149,9 @@ export class FirebaseDatabaseAdapter implements CampusDatabaseAdapter {
       const snapshot = await getDoc(snapRef);
       if (snapshot.exists()) {
         const data = snapshot.data() as CampusState;
+        if (Array.isArray(data.sessions)) {
+          data.sessions = data.sessions.filter(s => !isLegacyDummySession(s));
+        }
         this._isConnected = true;
         return data;
       }
@@ -164,8 +168,12 @@ export class FirebaseDatabaseAdapter implements CampusDatabaseAdapter {
     }
     try {
       const snapRef = doc(db, COLLECTION_SNAPSHOT, DOC_SNAPSHOT);
+      const cleanSessions = Array.isArray(state.sessions) 
+        ? state.sessions.filter(s => !isLegacyDummySession(s)) 
+        : [];
       const payload = sanitizeForFirestore({
         ...state,
+        sessions: cleanSessions,
         settings: {
           ...state.settings,
           cloudSyncStatus: 'synced',

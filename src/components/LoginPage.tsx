@@ -17,6 +17,7 @@ import { StudentStudyIllustration } from './StudentStudyIllustration';
 import { DYPatilLogo } from './DYPatilLogo';
 import { BiometricAuthModal } from './BiometricAuthModal';
 import { sha256Hex } from '../utils/crypto';
+import { authService } from '../services/authService';
 
 interface LoginPageProps {
   settings: SystemSettings;
@@ -122,6 +123,21 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           return;
         }
 
+        // Try server login to establish signed server session
+        try {
+          const res = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: cleanUser, password: cleanPass, role: 'hod' })
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.token) {
+              authService.setSessionToken(data.token);
+            }
+          }
+        } catch (_) {}
+
         // HOD Authenticated with HOD Name (e.g. Prof. Prashant Kathole)
         setFailedCount(0);
         onLoginSuccess({
@@ -174,6 +190,21 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         return;
       }
 
+      // Try server login to establish signed server session
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: cleanUser, password: cleanPass, role: 'teacher' })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.token) {
+            authService.setSessionToken(data.token);
+          }
+        }
+      } catch (_) {}
+
       // Teacher Authenticated!
       setFailedCount(0);
       onLoginSuccess({
@@ -207,7 +238,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         <div className="text-center pt-1 pb-1 flex flex-col items-center">
           <DYPatilLogo variant="emblem" className="w-18 h-22 sm:w-20 sm:h-24 mb-2.5 drop-shadow-xs" />
           <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight">
-            D.Y.PATIL TECHNCIAL CAMPUS
+            D.Y.PATIL TECHNICAL CAMPUS
           </h1>
           <p className="text-[12px] text-sky-700 font-bold tracking-wide mt-1 uppercase">
             Smart Attendance System
@@ -368,10 +399,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               disabled={isLockedOut}
               onClick={() => setIsBiometricModalOpen(true)}
               className="group flex items-center gap-1.5 py-2 px-3.5 rounded-full bg-slate-100/90 hover:bg-sky-50 border border-slate-200/90 hover:border-sky-300 text-slate-700 hover:text-sky-700 text-xs font-bold transition-all duration-200 shadow-2xs hover:shadow-xs active:scale-95 cursor-pointer select-none disabled:opacity-50"
-              title="Unlock using System Hardware Biometrics (Touch ID / Windows Hello)"
+              title={`Unlock using WebAuthn Biometrics for ${activeRoleMode === 'hod' ? 'HOD' : 'Faculty'}`}
             >
               <Fingerprint className="w-4 h-4 text-sky-600 transition-transform duration-200 group-hover:scale-110" />
-              <span>Biometric</span>
+              <span>Biometric ({activeRoleMode === 'hod' ? 'HOD' : 'Faculty'})</span>
             </button>
 
             {/* Standard Sign In Button */}
