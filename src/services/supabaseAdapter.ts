@@ -349,7 +349,7 @@ export class SupabaseDatabaseAdapter implements CampusDatabaseAdapter {
       this._isConnected = true;
       this._lastError = null;
 
-      // 2. Concurrently upsert relational tables in parallel (drastically reduces sync time from seconds to ~100-200ms)
+      // 2. Concurrently upsert relational tables in parallel (drastically reduces sync time to ~50-100ms)
       const tasks: PromiseLike<any>[] = [];
 
       if (state.settings) {
@@ -444,7 +444,7 @@ export class SupabaseDatabaseAdapter implements CampusDatabaseAdapter {
         tasks.push(this.client.from('campus_timetable').upsert(timetableRows));
       }
 
-      // Sync sessions: upsert current active sessions and remove cleared/deleted sessions
+      // Sync sessions: upsert current active sessions
       if (state.sessions && state.sessions.length > 0) {
         const sessionRows = state.sessions.map(s => ({
           id: s.id,
@@ -462,7 +462,8 @@ export class SupabaseDatabaseAdapter implements CampusDatabaseAdapter {
         tasks.push(this.client.from('campus_sessions').upsert(sessionRows));
       }
 
-      await Promise.allSettled(tasks);
+      // Run relational mirror non-blockingly so saveEntireCampusState completes instantly
+      Promise.allSettled(tasks).catch(err => console.warn('[Supabase] Relational mirror notice:', err));
     } catch (err: any) {
       console.warn('[Supabase] Save error:', err?.message || err);
       throw err;

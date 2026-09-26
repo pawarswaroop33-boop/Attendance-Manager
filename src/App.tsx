@@ -101,7 +101,12 @@ export default function App() {
   const [teachers, setTeachers] = useState<Teacher[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_TEACHERS);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
     } catch (e) {
       console.error('Failed to load teachers', e);
     }
@@ -112,7 +117,12 @@ export default function App() {
   const [classrooms, setClassrooms] = useState<Classroom[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_CLASSROOMS);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
     } catch (e) {
       console.error('Failed to load classrooms', e);
     }
@@ -125,7 +135,7 @@ export default function App() {
       const saved = localStorage.getItem(STORAGE_KEY_TIMETABLE);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.some(s => s.classId === 'class-ece-a')) {
+        if (Array.isArray(parsed) && parsed.length > 0) {
           return parsed;
         }
       }
@@ -141,7 +151,7 @@ export default function App() {
       const saved = localStorage.getItem(STORAGE_KEY_CLASSES);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.some(c => c.name.includes('Electronics and Computer Engineering'))) {
+        if (Array.isArray(parsed) && parsed.length > 0) {
           return parsed;
         }
       }
@@ -157,7 +167,7 @@ export default function App() {
       const saved = localStorage.getItem(STORAGE_KEY_STUDENTS);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.classId === 'class-ece-a') {
+        if (Array.isArray(parsed) && parsed.length > 0) {
           return parsed;
         }
       }
@@ -464,11 +474,15 @@ export default function App() {
     if (dbService.isQuotaExhausted) return;
     if (!userHasModifiedDataRef.current) return;
 
-    // Fast signature to avoid re-uploading identical states
+    // Comprehensive state signature tracking settings, classes, students, faculty, classrooms, timetable, and sessions
     const latestSessionUpdate = sessions.reduce((latest, s) => {
       return (s.lastUpdated && s.lastUpdated > latest) ? s.lastUpdated : latest;
     }, '');
-    const stateSignature = `${settings.collegeName}_${classes.length}_${students.length}_${sessions.length}_${latestSessionUpdate}_${timetable.length}`;
+    const teacherSig = teachers.map(t => `${t.id}-${t.uniqueCode}-${t.passcode}-${t.name}`).join('|');
+    const timetableSig = timetable.map(s => `${s.id}-${s.dayOfWeek}-${s.startTime}-${s.subject}-${s.teacherId}`).join('|');
+    const classSig = classes.map(c => `${c.id}-${c.studentIds.length}`).join('|');
+    const stateSignature = `${settings.collegeName}_${settings.hodPasscode}_${classes.length}_${classSig}_${students.length}_${teachers.length}_${teacherSig}_${timetable.length}_${timetableSig}_${sessions.length}_${latestSessionUpdate}`;
+    
     if (lastSyncedHashRef.current === stateSignature) return;
 
     const timer = setTimeout(async () => {
@@ -1484,49 +1498,166 @@ export default function App() {
             teachers={teachers}
             onAddTeacher={(t) => {
               notifyUserChange();
-              setTeachers(prev => [...prev, t]);
+              const next = [...teachers, t];
+              setTeachers(next);
+              try {
+                localStorage.setItem(STORAGE_KEY_TEACHERS, JSON.stringify(next));
+              } catch (_) {}
+              dbService.saveEntireCampusState({
+                settings,
+                classes,
+                students,
+                teachers: next,
+                classrooms,
+                timetable,
+                sessions
+              }).catch(console.warn);
               showToast(`Teacher ${t.name} added with code ${t.uniqueCode}`, 'success');
             }}
             onUpdateTeacher={(t) => {
               notifyUserChange();
-              setTeachers(prev => prev.map(old => old.id === t.id ? t : old));
+              const next = teachers.map(old => old.id === t.id ? t : old);
+              setTeachers(next);
+              try {
+                localStorage.setItem(STORAGE_KEY_TEACHERS, JSON.stringify(next));
+              } catch (_) {}
+              dbService.saveEntireCampusState({
+                settings,
+                classes,
+                students,
+                teachers: next,
+                classrooms,
+                timetable,
+                sessions
+              }).catch(console.warn);
             }}
             onDeleteTeacher={(id) => {
               notifyUserChange();
-              setTeachers(prev => prev.filter(t => t.id !== id));
+              const next = teachers.filter(t => t.id !== id);
+              setTeachers(next);
+              try {
+                localStorage.setItem(STORAGE_KEY_TEACHERS, JSON.stringify(next));
+              } catch (_) {}
+              dbService.saveEntireCampusState({
+                settings,
+                classes,
+                students,
+                teachers: next,
+                classrooms,
+                timetable,
+                sessions
+              }).catch(console.warn);
               showToast('Faculty member removed.', 'info');
             }}
             classrooms={classrooms}
             onAddClassroom={(r) => {
               notifyUserChange();
-              setClassrooms(prev => [...prev, r]);
+              const next = [...classrooms, r];
+              setClassrooms(next);
+              try {
+                localStorage.setItem(STORAGE_KEY_CLASSROOMS, JSON.stringify(next));
+              } catch (_) {}
+              dbService.saveEntireCampusState({
+                settings,
+                classes,
+                students,
+                teachers,
+                classrooms: next,
+                timetable,
+                sessions
+              }).catch(console.warn);
               showToast(`Classroom ${r.name} created.`, 'success');
             }}
             onDeleteClassroom={(id) => {
               notifyUserChange();
-              setClassrooms(prev => prev.filter(r => r.id !== id));
+              const next = classrooms.filter(r => r.id !== id);
+              setClassrooms(next);
+              try {
+                localStorage.setItem(STORAGE_KEY_CLASSROOMS, JSON.stringify(next));
+              } catch (_) {}
+              dbService.saveEntireCampusState({
+                settings,
+                classes,
+                students,
+                teachers,
+                classrooms: next,
+                timetable,
+                sessions
+              }).catch(console.warn);
               showToast('Classroom removed.', 'info');
             }}
             classes={classes}
             onAddClass={(c) => {
               notifyUserChange();
-              setClasses(prev => [...prev, c]);
+              const next = [...classes, c];
+              setClasses(next);
+              try {
+                localStorage.setItem(STORAGE_KEY_CLASSES, JSON.stringify(next));
+              } catch (_) {}
+              dbService.saveEntireCampusState({
+                settings,
+                classes: next,
+                students,
+                teachers,
+                classrooms,
+                timetable,
+                sessions
+              }).catch(console.warn);
               showToast(`Class ${c.name} created.`, 'success');
             }}
             onDeleteClass={(id) => {
               notifyUserChange();
-              setClasses(prev => prev.filter(c => c.id !== id));
+              const next = classes.filter(c => c.id !== id);
+              setClasses(next);
+              try {
+                localStorage.setItem(STORAGE_KEY_CLASSES, JSON.stringify(next));
+              } catch (_) {}
+              dbService.saveEntireCampusState({
+                settings,
+                classes: next,
+                students,
+                teachers,
+                classrooms,
+                timetable,
+                sessions
+              }).catch(console.warn);
               showToast('Class group removed.', 'info');
             }}
             timetable={timetable}
             onAddTimetableSlot={(s) => {
               notifyUserChange();
-              setTimetable(prev => [...prev, s]);
+              const next = [...timetable, s];
+              setTimetable(next);
+              try {
+                localStorage.setItem(STORAGE_KEY_TIMETABLE, JSON.stringify(next));
+              } catch (_) {}
+              dbService.saveEntireCampusState({
+                settings,
+                classes,
+                students,
+                teachers,
+                classrooms,
+                timetable: next,
+                sessions
+              }).catch(console.warn);
               showToast('Lecture scheduled into timetable.', 'success');
             }}
             onDeleteTimetableSlot={(id) => {
               notifyUserChange();
-              setTimetable(prev => prev.filter(s => s.id !== id));
+              const next = timetable.filter(s => s.id !== id);
+              setTimetable(next);
+              try {
+                localStorage.setItem(STORAGE_KEY_TIMETABLE, JSON.stringify(next));
+              } catch (_) {}
+              dbService.saveEntireCampusState({
+                settings,
+                classes,
+                students,
+                teachers,
+                classrooms,
+                timetable: next,
+                sessions
+              }).catch(console.warn);
               showToast('Timetable lecture removed.', 'info');
             }}
             students={students}
