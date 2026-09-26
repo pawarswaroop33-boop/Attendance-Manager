@@ -130,3 +130,10 @@ export interface WhatsAppMessageConfig {
   customNote: string;
   targetPhone?: string;
 }
+
+export interface Holiday {
+  date: string; // YYYY-MM-DD
+  title: string; // e.g. "Ganesh Chaturthi", "Institutional Holiday"
+  declaredBy?: string;
+  createdAt?: string;
+}

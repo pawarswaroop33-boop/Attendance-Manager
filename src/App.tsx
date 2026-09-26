@@ -17,7 +17,8 @@ import {
   Teacher,
   Classroom,
   TimetableSlot,
-  SystemSettings
+  SystemSettings,
+  Holiday
 } from './types';
 import { dbService } from './services/databaseService';
 import { LoginPage } from './components/LoginPage';
@@ -31,8 +32,7 @@ import { TimetableLectureSelector } from './components/TimetableLectureSelector'
 import { HodControlCenter } from './components/HodControlCenter';
 import { ImportStudentsModal } from './components/ImportStudentsModal';
 import { WhatsAppShareModal } from './components/WhatsAppShareModal';
-import { BiometricEnrollModal } from './components/BiometricEnrollModal';
-import { getDayOfWeek, isLegacyDummySession, isValidRecordedSession } from './utils/dateUtils';
+import { getDayOfWeek, isLegacyDummySession, isValidRecordedSession, getTodayDateStr } from './utils/dateUtils';
 import { authService } from './services/authService';
 import { 
   isSlotBelongsToTeacher, 
@@ -50,6 +50,7 @@ const STORAGE_KEY_TIMETABLE = 'dypatil_timetable_v1';
 const STORAGE_KEY_CLASSES = 'dypatil_classes_v1';
 const STORAGE_KEY_STUDENTS = 'dypatil_students_v1';
 const STORAGE_KEY_SESSIONS = 'dypatil_sessions_v1';
+const STORAGE_KEY_HOLIDAYS = 'dypatil_holidays_v1';
 
 export default function App() {
   // Helper to format today YYYY-MM-DD
@@ -199,6 +200,20 @@ export default function App() {
     return [];
   });
 
+  // 9. Declared Official Holidays
+  const [holidays, setHolidays] = useState<Holiday[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_HOLIDAYS);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {
+      console.error('Failed to load holidays', e);
+    }
+    return [];
+  });
+
   // Active UI Navigation & Selection State
   const [selectedClassId, setSelectedClassId] = useState<string>(() => classes[0]?.id || 'class-ece-a');
   const [selectedDate, setSelectedDate] = useState<string>(getTodayDateStr());
@@ -249,7 +264,6 @@ export default function App() {
   // Modals & Synchronization States
   const [isWhatsAppModalOpen, setIsWhatsAppModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
-  const [isBiometricEnrollOpen, setIsBiometricEnrollOpen] = useState(false);
   const [savedIndicator, setSavedIndicator] = useState(true);
   const [cloudSyncing, setCloudSyncing] = useState(false);
   const [isDbReady, setIsDbReady] = useState(false);
@@ -356,6 +370,7 @@ export default function App() {
           if (cloudState.teachers && cloudState.teachers.length > 0) setTeachers(cloudState.teachers);
           if (cloudState.classrooms && cloudState.classrooms.length > 0) setClassrooms(cloudState.classrooms);
           if (cloudState.timetable && cloudState.timetable.length > 0) setTimetable(cloudState.timetable);
+          if (cloudState.holidays && Array.isArray(cloudState.holidays)) setHolidays(cloudState.holidays);
           
           // Non-destructively merge clean local real sessions with clean cloud real sessions
           const cleanLocalSessions = (sessions || []).filter(isValidRecordedSession);
@@ -427,6 +442,7 @@ export default function App() {
             if (incoming.teachers) setTeachers(incoming.teachers);
             if (incoming.classrooms) setClassrooms(incoming.classrooms);
             if (incoming.timetable) setTimetable(incoming.timetable);
+            if (incoming.holidays && Array.isArray(incoming.holidays)) setHolidays(incoming.holidays);
             if (incoming.sessions) {
               const cleanIncoming = incoming.sessions.filter(s => !isLegacyDummySession(s));
               setSessions(prevLocal => {
@@ -534,6 +550,38 @@ export default function App() {
     }
   }, [sessions]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_HOLIDAYS, JSON.stringify(holidays));
+    } catch (e) {
+      console.error(e);
+    }
+  }, [holidays]);
+
+  // Handlers for Declaring and Removing Official Holidays
+  const handleDeclareHoliday = useCallback((dateStr: string, title: string) => {
+    if (!dateStr) return;
+    const newHoliday: Holiday = {
+      date: dateStr,
+      title: title.trim() || 'Declared Official Holiday',
+      declaredBy: currentUser?.name || 'Authorized Faculty/HOD',
+      createdAt: new Date().toISOString()
+    };
+    setHolidays(prev => {
+      const filtered = prev.filter(h => h.date !== dateStr);
+      return [...filtered, newHoliday];
+    });
+    notifyUserChange();
+    showToast(`Official Holiday declared for ${dateStr}: "${title}"`, 'success');
+  }, [currentUser]);
+
+  const handleRemoveHoliday = useCallback((dateStr: string) => {
+    if (!dateStr) return;
+    setHolidays(prev => prev.filter(h => h.date !== dateStr));
+    notifyUserChange();
+    showToast(`Holiday status removed for ${dateStr}.`, 'info');
+  }, []);
+
   // Debounced Cloud Sync: Persists user-initiated changes without spamming Firestore or exhausting daily limits
   useEffect(() => {
     if (isInitialMountRef.current) {
@@ -552,7 +600,8 @@ export default function App() {
     const teacherSig = teachers.map(t => `${t.id}-${t.uniqueCode}-${t.passcode}-${t.name}`).join('|');
     const timetableSig = timetable.map(s => `${s.id}-${s.dayOfWeek}-${s.startTime}-${s.subject}-${s.teacherId}`).join('|');
     const classSig = classes.map(c => `${c.id}-${c.studentIds.length}`).join('|');
-    const stateSignature = `${settings.collegeName}_${settings.hodPasscode}_${classes.length}_${classSig}_${students.length}_${teachers.length}_${teacherSig}_${timetable.length}_${timetableSig}_${sessions.length}_${latestSessionUpdate}`;
+    const holidaySig = holidays.map(h => `${h.date}-${h.title}`).join('|');
+    const stateSignature = `${settings.collegeName}_${settings.hodPasscode}_${classes.length}_${classSig}_${students.length}_${teachers.length}_${teacherSig}_${timetable.length}_${timetableSig}_${sessions.length}_${latestSessionUpdate}_${holidays.length}_${holidaySig}`;
     
     if (lastSyncedHashRef.current === stateSignature) return;
 
@@ -567,7 +616,8 @@ export default function App() {
           teachers,
           classrooms,
           timetable,
-          sessions
+          sessions,
+          holidays
         });
         lastSyncedHashRef.current = stateSignature;
         setSavedIndicator(true);
@@ -682,6 +732,11 @@ export default function App() {
 
   // Real-time Update individual record (ticking checkbox, setting absent, late, or adding note)
   const handleUpdateRecord = useCallback((studentId: string, status: AttendanceStatus, note?: string) => {
+    const todayStr = getTodayDateStr();
+    if (selectedDate > todayStr) {
+      showToast("Cannot record attendance: Selected date is in the future.", "error");
+      return;
+    }
     if (currentUser?.role === 'teacher' && !hasLectureOnSelectedDate) {
       showToast("Cannot record attendance: You have no scheduled lectures on this date.", "error");
       return;
@@ -773,6 +828,11 @@ export default function App() {
 
   // Batch update (All Present, All Absent, or Clear All)
   const handleBatchUpdate = useCallback((status: AttendanceStatus) => {
+    const todayStr = getTodayDateStr();
+    if (selectedDate > todayStr) {
+      showToast("Cannot record attendance: Selected date is in the future.", "error");
+      return;
+    }
     if (currentUser?.role === 'teacher' && !hasLectureOnSelectedDate) {
       showToast("Cannot record attendance: You have no scheduled lectures on this date.", "error");
       return;
@@ -1114,6 +1174,11 @@ export default function App() {
 
   // Explicitly Save Attendance Session Permanently to Local Storage and Cloud Database
   const handleSaveAttendancePermanently = async () => {
+    const todayStr = getTodayDateStr();
+    if (selectedDate > todayStr) {
+      showToast("Cannot save attendance: Selected date is in the future.", "error");
+      return;
+    }
     if (currentUser?.role === 'teacher' && !hasLectureOnSelectedDate) {
       showToast("Cannot save attendance: No lecture is scheduled for you on this day.", "error");
       return;
@@ -1446,7 +1511,6 @@ export default function App() {
         onDateChange={setSelectedDate}
         onOpenWhatsApp={handleOpenWhatsAppModal}
         onOpenImportModal={handleOpenImportModal}
-        onOpenBiometrics={() => setIsBiometricEnrollOpen(true)}
         savedIndicator={savedIndicator}
         totalPresent={totalPresentCount}
         totalStudents={currentClass.studentIds.length}
@@ -1493,7 +1557,9 @@ export default function App() {
               }}
               onNavigateToTimetable={() => handleTabChange('timetable')}
               onSelectDate={setSelectedDate}
-              onOpenBiometrics={() => setIsBiometricEnrollOpen(true)}
+              holidays={holidays}
+              onDeclareHoliday={handleDeclareHoliday}
+              onRemoveHoliday={handleRemoveHoliday}
             />
           </div>
         )}
@@ -1533,6 +1599,9 @@ export default function App() {
             onOpenWhatsAppModal={handleOpenWhatsAppModal}
             onClearDateAttendance={handleClearDateAttendance}
             onClearSession={handleClearSession}
+            holidays={holidays}
+            onDeclareHoliday={handleDeclareHoliday}
+            onRemoveHoliday={handleRemoveHoliday}
           />
         )}
 
@@ -1579,7 +1648,6 @@ export default function App() {
               }
             }}
             onResetSettings={handleResetSettingsOnly}
-            onOpenBiometrics={() => setIsBiometricEnrollOpen(true)}
             teachers={teachers}
             onAddTeacher={(t) => {
               notifyUserChange();
@@ -1764,6 +1832,9 @@ export default function App() {
             sessions={sessions}
             onClearDateAttendance={handleClearDateAttendance}
             onClearSession={handleClearSession}
+            holidays={holidays}
+            onDeclareHoliday={handleDeclareHoliday}
+            onRemoveHoliday={handleRemoveHoliday}
           />
         )}
 
@@ -1786,15 +1857,6 @@ export default function App() {
         currentClass={currentClass}
         students={students}
       />
-
-      {/* MODAL 3: HARDWARE BIOMETRIC ENROLLMENT */}
-      {currentUser && (
-        <BiometricEnrollModal
-          isOpen={isBiometricEnrollOpen}
-          onClose={() => setIsBiometricEnrollOpen(false)}
-          currentUser={currentUser}
-        />
-      )}
 
       {/* Footer */}
       <footer className="bg-white border-t border-slate-200 py-3.5 px-4 text-center text-xs text-slate-500">

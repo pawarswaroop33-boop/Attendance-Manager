@@ -26,7 +26,7 @@ import {
   AlertTriangle,
   RotateCcw
 } from 'lucide-react';
-import { Student, ClassGroup, AttendanceSession, SystemSettings, AuthUser, TimetableSlot } from '../types';
+import { Student, ClassGroup, AttendanceSession, SystemSettings, AuthUser, TimetableSlot, Holiday } from '../types';
 import {
   formatDateShort,
   formatDateWithDay,
@@ -37,7 +37,8 @@ import {
   getCalendarMonthGrid,
   parseDateKey,
   formatDateKey,
-  isLegacyDummySession
+  isLegacyDummySession,
+  getHolidayForDate
 } from '../utils/dateUtils';
 import { getLecturesForDateAndUser } from '../utils/teacherFilter';
 
@@ -55,6 +56,9 @@ interface AttendanceCalendarProps {
   onClearSession?: (sessionId: string) => void;
   currentUser?: AuthUser;
   timetable?: TimetableSlot[];
+  holidays?: Holiday[];
+  onDeclareHoliday?: (dateStr: string, title: string) => void;
+  onRemoveHoliday?: (dateStr: string) => void;
 }
 
 export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
@@ -70,8 +74,22 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
   onClearDateAttendance,
   onClearSession,
   currentUser,
-  timetable = []
+  timetable = [],
+  holidays = [],
+  onDeclareHoliday,
+  onRemoveHoliday
 }) => {
+  const [isDeclareHolidayModalOpen, setIsDeclareHolidayModalOpen] = useState(false);
+  const [holidayTitleInput, setHolidayTitleInput] = useState('');
+
+  // Map of declared holidays by date string (YYYY-MM-DD)
+  const holidaysMap = useMemo(() => {
+    const map = new Map<string, Holiday>();
+    (holidays || []).forEach(h => {
+      if (h.date) map.set(h.date, h);
+    });
+    return map;
+  }, [holidays]);
   // Parse initial view year and month from selectedDate, or latest session date, or today
   const initialParsed = useMemo(() => {
     if (selectedDate) return parseDateKey(selectedDate);
@@ -209,6 +227,11 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
     return getDayOfWeek(selectedDate);
   }, [selectedDate]);
 
+  const selectedDateHoliday = useMemo(() => {
+    if (!selectedDate) return null;
+    return getHolidayForDate(selectedDate, holidays);
+  }, [selectedDate, holidays]);
+
   // Scheduled timetable lectures for selectedDate
   const scheduledLecturesForSelectedDate = useMemo(() => {
     if (!selectedDate || !timetable || timetable.length === 0) return [];
@@ -344,7 +367,7 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
         </div>
 
         {/* Tactile Texture Calendar Grid Body */}
-        <div className="p-2 sm:p-5 texture-dot-grid bg-slate-50/50 overflow-x-hidden w-full max-w-full min-w-0">
+        <div className="p-2 sm:p-5 texture-dot-grid bg-slate-100/60 rounded-2xl border border-slate-200/80 shadow-[inset_0_2px_6px_rgba(0,0,0,0.04)] overflow-x-hidden w-full max-w-full min-w-0">
           
           {/* Weekday Header Columns */}
           <div className="grid grid-cols-7 gap-1 sm:gap-2 text-center mb-2 w-full min-w-0">
@@ -364,11 +387,12 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
             })}
           </div>
 
-          {/* Calendar 35/42 Cell Grid with 3D Depth */}
+          {/* Calendar 35/42 Cell Grid with Smooth Embedded 3D Depth */}
           <div className="grid grid-cols-7 gap-1 sm:gap-2 w-full min-w-0">
             {calendarCells.map((cell) => {
               const summary = dateSummaries.get(cell.dateStr);
               const hasLectures = summary && summary.count > 0;
+              const cellHoliday = getHolidayForDate(cell.dateStr, holidays);
               const isSelected = selectedDate !== null && cell.dateStr === selectedDate;
               const isToday = cell.isToday;
 
@@ -389,14 +413,14 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
                   key={cell.dateStr}
                   type="button"
                   onClick={() => onSelectDate(isSelected ? null : cell.dateStr)}
-                  className={`relative min-h-[58px] sm:min-h-[82px] w-full min-w-0 p-1 sm:p-2 rounded-xl sm:rounded-2xl text-left day-cell-3d cursor-pointer flex flex-col justify-between border overflow-hidden transition-all ${
+                  className={`relative min-h-[58px] sm:min-h-[82px] w-full min-w-0 p-1 sm:p-2 rounded-xl sm:rounded-2xl text-left day-cell-3d cursor-pointer flex flex-col justify-between overflow-hidden transition-all duration-200 select-none focus:outline-none focus:outline-hidden ${
                     isSelected
-                      ? 'bg-slate-900 text-white border-slate-950 shadow-[0_10px_20px_-4px_rgba(15,23,42,0.35),inset_0_1px_0_rgba(255,255,255,0.15)] ring-2 ring-emerald-500/80 -translate-y-0.5 z-10'
+                      ? 'bg-gradient-to-b from-white via-slate-50 to-slate-100 text-slate-900 border-2 border-slate-800 shadow-[inset_0_1px_0_rgba(255,255,255,1),0_4px_14px_-1px_rgba(15,23,42,0.18)] -translate-y-0.5 z-10'
                       : hasLectures
-                        ? 'bg-white text-slate-900 border-slate-200/90 hover:border-slate-400 shadow-[0_2px_6px_rgba(0,0,0,0.04),inset_0_1px_0_rgba(255,255,255,0.9)]'
+                        ? 'bg-gradient-to-b from-white via-slate-50/70 to-slate-100/50 text-slate-900 border border-slate-300/90 shadow-[0_1px_3px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,1)] hover:border-slate-400 hover:shadow-[0_3px_8px_rgba(0,0,0,0.08)] hover:-translate-y-0.5 active:translate-y-0 active:shadow-inner'
                         : cell.isCurrentMonth
-                          ? 'bg-white/80 hover:bg-white text-slate-700 border-slate-200/60 hover:border-slate-300 shadow-2xs'
-                          : 'bg-slate-100/60 text-slate-400 border-transparent hover:bg-slate-100/90'
+                          ? 'bg-gradient-to-b from-white via-white to-slate-50/60 text-slate-800 border border-slate-300/80 shadow-[0_1px_2px_rgba(0,0,0,0.04),inset_0_1px_0_rgba(255,255,255,0.9)] hover:border-slate-400/90 hover:shadow-[0_2px_6px_rgba(0,0,0,0.06)] hover:-translate-y-0.5 active:translate-y-0 active:shadow-inner'
+                          : 'bg-slate-100/40 text-slate-400 border border-slate-200/50 hover:bg-slate-100/70'
                   }`}
                 >
                   {/* Top row: Day Number & Today indicator */}
@@ -404,7 +428,7 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
                     <span
                       className={`text-xs sm:text-sm font-black font-mono transition-colors shrink-0 ${
                         isSelected
-                          ? 'text-white'
+                          ? 'text-slate-950 font-extrabold'
                           : isToday
                             ? 'text-emerald-700 bg-emerald-100/80 px-1 py-0.2 rounded-md'
                             : cell.isCurrentMonth
@@ -419,7 +443,7 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
                     {isToday && (
                       <span
                         className={`text-[8px] sm:text-[9px] font-black uppercase tracking-wider px-1 py-0.2 rounded shrink-0 leading-none ${
-                          isSelected ? 'bg-emerald-400 text-slate-950' : 'bg-emerald-100 text-emerald-800'
+                          isSelected ? 'bg-emerald-600 text-white shadow-2xs' : 'bg-emerald-100 text-emerald-800'
                         }`}
                       >
                         <span className="hidden sm:inline">Today</span>
@@ -428,13 +452,31 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
                     )}
                   </div>
 
-                  {/* Bottom: Dedicated Attendance Badge with ZERO overflow */}
-                  {hasLectures ? (
+                  {/* Bottom: Dedicated Attendance Badge or Holiday Badge with ZERO overflow */}
+                  {cellHoliday ? (
                     <div className="mt-auto w-full min-w-0 pt-0.5 sm:pt-1">
                       <div
                         className={`w-full px-1 py-0.5 sm:py-1 rounded-md sm:rounded-lg text-center flex flex-col items-center justify-center transition-all overflow-hidden ${
                           isSelected
-                            ? 'bg-white/20 text-white border border-white/25 shadow-xs'
+                            ? 'bg-amber-400 text-slate-950 font-black shadow-xs border border-amber-300'
+                            : 'bg-amber-100/90 text-amber-900 border border-amber-300 shadow-2xs font-bold'
+                        }`}
+                        title={`Declared Holiday: ${cellHoliday.title}`}
+                      >
+                        <span className="font-mono font-black text-[9px] sm:text-[10px] tracking-tight text-center leading-tight truncate w-full block">
+                          🏖️ HOLIDAY
+                        </span>
+                        <span className="text-[7.5px] sm:text-[8.5px] font-extrabold text-center leading-tight truncate w-full block opacity-90">
+                          {cellHoliday.title}
+                        </span>
+                      </div>
+                    </div>
+                  ) : hasLectures ? (
+                    <div className="mt-auto w-full min-w-0 pt-0.5 sm:pt-1">
+                      <div
+                        className={`w-full px-1 py-0.5 sm:py-1 rounded-md sm:rounded-lg text-center flex flex-col items-center justify-center transition-all overflow-hidden ${
+                          isSelected
+                            ? 'bg-slate-900 text-white font-bold border border-slate-800 shadow-2xs'
                             : badgeBg
                         }`}
                         title={`${summary.count} lecture(s) - ${summary.avgAttendanceRate}% attendance (${summary.totalPresent} Present, ${summary.totalAbsent} Absent)`}
@@ -445,7 +487,7 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
                         </span>
                         {/* Lecture count: Small subtext directly below percentage */}
                         <span className={`text-[7.5px] sm:text-[8.5px] font-bold text-center leading-tight truncate w-full block ${
-                          isSelected ? 'text-white/80' : 'opacity-75'
+                          isSelected ? 'text-slate-200' : 'opacity-75'
                         }`}>
                           <span className="sm:hidden">{summary.count}L</span>
                           <span className="hidden sm:inline">{summary.count} {summary.count === 1 ? 'Lec' : 'Lecs'}</span>
@@ -456,9 +498,9 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
                     <div className="h-1 sm:h-2" />
                   )}
 
-                  {/* Active selection bottom glow strip */}
+                  {/* Active selection subtle accent indicator */}
                   {isSelected && (
-                    <div className="absolute bottom-0 left-1 right-1 h-0.5 bg-gradient-to-r from-emerald-400 via-sky-400 to-emerald-400 rounded-full" />
+                    <div className="absolute bottom-0 left-1.5 right-1.5 h-0.5 bg-slate-800 rounded-full" />
                   )}
                 </button>
               );
@@ -501,6 +543,22 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
 
             {/* Quick Date Stats & Action */}
             <div className="flex flex-wrap items-center gap-2.5">
+              {/* Declare as Holiday Button */}
+              {(!selectedDateHoliday || selectedDateHoliday.declaredBy === 'System Default') && onDeclareHoliday && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHolidayTitleInput(selectedDateHoliday?.declaredBy === 'System Default' ? selectedDateHoliday.title : '');
+                    setIsDeclareHolidayModalOpen(true);
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-gradient-to-b from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-white text-xs font-black transition-all border border-amber-400/50 shadow-xs active:scale-95 active:translate-y-0.5 flex items-center gap-1.5 cursor-pointer"
+                  title="Declare this date as an official holiday or edit holiday title"
+                >
+                  <span>🏖️</span>
+                  <span>{selectedDateHoliday?.declaredBy === 'System Default' ? 'Custom Holiday Title' : 'Declare as Holiday'}</span>
+                </button>
+              )}
+
               {selectedDateSummary ? (
                 <div className="flex items-center gap-2 bg-slate-800/90 border border-slate-700 px-3.5 py-2 rounded-xl shadow-xs">
                   <div className="text-right pr-2 border-r border-slate-700">
@@ -571,6 +629,40 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
               </button>
             </div>
           </div>
+
+          {/* Official Declared Holiday Banner */}
+          {selectedDateHoliday && (
+            <div className="bg-gradient-to-r from-amber-500 via-amber-600 to-amber-700 text-white rounded-2xl p-4 sm:p-5 shadow-lg border border-amber-400 flex flex-col sm:flex-row sm:items-center justify-between gap-4 card-3d animate-fadeIn">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center text-2xl shadow-inner shrink-0">
+                  🏖️
+                </div>
+                <div className="space-y-0.5">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/20 text-amber-100 text-[10px] font-black uppercase tracking-wider">
+                    Official Declared Holiday
+                  </span>
+                  <h3 className="text-lg sm:text-xl font-black text-white">
+                    {selectedDateHoliday.title}
+                  </h3>
+                  <p className="text-xs text-amber-100">
+                    Date: {formatDateWithDay(selectedDate, selectedDateDayOfWeek)}
+                    {selectedDateHoliday.declaredBy ? ` • Declared by ${selectedDateHoliday.declaredBy}` : ''}
+                  </p>
+                </div>
+              </div>
+
+              {onRemoveHoliday && selectedDateHoliday.declaredBy !== 'System Default' && (
+                <button
+                  type="button"
+                  onClick={() => onRemoveHoliday(selectedDate)}
+                  className="px-4 py-2.5 rounded-xl bg-white hover:bg-rose-50 text-rose-700 text-xs font-black transition-all shadow-md active:scale-95 flex items-center gap-1.5 cursor-pointer shrink-0 border border-rose-200"
+                >
+                  <Trash2 className="w-4 h-4 text-rose-600" />
+                  <span>Remove Custom Holiday Override</span>
+                </button>
+              )}
+            </div>
+          )}
 
         {/* Selected Date Lectures Listing */}
         {selectedDateSessions.length === 0 ? (
@@ -1076,6 +1168,92 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>Yes, Delete Session</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: DECLARE HOLIDAY */}
+      {isDeclareHolidayModalOpen && selectedDate && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-5 animate-gentle-pop">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-amber-50 text-amber-700 border border-amber-200 flex items-center justify-center text-xl shadow-inner">
+                  🏖️
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900">Declare Official Holiday</h3>
+                  <p className="text-xs text-slate-500 font-semibold">{formatDateWithDay(selectedDate)}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDeclareHolidayModalOpen(false)}
+                className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <label className="block text-xs font-extrabold text-slate-700">
+                Holiday Title / Occasion
+              </label>
+
+              {/* Quick Preset Buttons */}
+              <div className="flex flex-wrap gap-1.5 pt-0.5">
+                {[
+                  'Institutional Holiday',
+                  'Public / Festival Holiday',
+                  'College Annual Day / Event',
+                  'Departmental Event',
+                  'Semester Vacation'
+                ].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setHolidayTitleInput(preset)}
+                    className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-[11px] font-bold transition-all cursor-pointer"
+                  >
+                    {preset}
+                  </button>
+                ))}
+              </div>
+
+              <input
+                type="text"
+                value={holidayTitleInput}
+                onChange={(e) => setHolidayTitleInput(e.target.value)}
+                placeholder="Enter holiday title e.g. Ganesh Chaturthi"
+                className="w-full bg-slate-50 border border-slate-300 rounded-2xl px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                autoFocus
+              />
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                Declaring a holiday marks this date on the campus attendance log and notifies faculty that no regular lectures are conducted on this day.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setIsDeclareHolidayModalOpen(false)}
+                className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onDeclareHoliday && selectedDate) {
+                    onDeclareHoliday(selectedDate, holidayTitleInput || 'Declared Official Holiday');
+                  }
+                  setIsDeclareHolidayModalOpen(false);
+                }}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-b from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-white text-xs font-black transition-all shadow-md active:scale-95 cursor-pointer"
+              >
+                Declare Holiday
               </button>
             </div>
           </div>

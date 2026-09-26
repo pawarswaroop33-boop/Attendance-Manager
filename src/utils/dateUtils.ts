@@ -1,4 +1,4 @@
-import { AttendanceSession, Student } from '../types';
+import { AttendanceSession, Student, Holiday } from '../types';
 
 export const DAYS_OF_WEEK = [
   'Sunday',
@@ -28,6 +28,17 @@ export const MONTH_NAMES = [
 ] as const;
 
 /**
+ * Returns current date formatted as YYYY-MM-DD
+ */
+export const getTodayDateStr = (): string => {
+  const today = new Date();
+  const yyyy = today.getFullYear();
+  const mm = String(today.getMonth() + 1).padStart(2, '0');
+  const dd = String(today.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
+/**
  * Returns formatted YYYY-MM-DD string with 0-padded month and day
  */
 export const formatDateKey = (year: number, monthIndex: number, day: number): string => {
@@ -47,6 +58,11 @@ export const formatDateKey = (year: number, monthIndex: number, day: number): st
 export const isValidRecordedSession = (session: any): boolean => {
   if (!session || typeof session !== 'object') return false;
   if (session.isDummy === true) return false;
+
+  // Reject any session with a future date
+  if (session.date && session.date > getTodayDateStr()) {
+    return false;
+  }
 
   const id = String(session.id || '').toLowerCase();
   const name = String(session.sessionName || '').toLowerCase();
@@ -197,6 +213,39 @@ export const getDayOfWeek = (dateStr: string): string => {
   } catch (_) {
     return '';
   }
+};
+
+/**
+ * Checks if a given YYYY-MM-DD date is a Sunday.
+ */
+export const isSunday = (dateStr: string): boolean => {
+  if (!dateStr) return false;
+  return getDayOfWeek(dateStr) === 'Sunday';
+};
+
+/**
+ * Returns the Holiday object for a given date.
+ * Automatically treats Sundays as default weekly holidays unless overridden by explicit declared holidays.
+ */
+export const getHolidayForDate = (dateStr: string, holidays: Holiday[] = []): Holiday | null => {
+  if (!dateStr) return null;
+
+  // 1. Check explicit custom declared holiday (user declared title/override)
+  const customHoliday = (holidays || []).find(h => h.date === dateStr);
+  if (customHoliday) {
+    return customHoliday;
+  }
+
+  // 2. Sunday is by default a weekly holiday
+  if (isSunday(dateStr)) {
+    return {
+      date: dateStr,
+      title: 'Sunday (Weekly Off)',
+      declaredBy: 'System Default'
+    };
+  }
+
+  return null;
 };
 
 /**

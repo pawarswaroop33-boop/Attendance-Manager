@@ -33,11 +33,10 @@ import {
   Trash2
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { AttendanceSession, ClassGroup, Student, AttendanceStatus, AuthUser, TimetableSlot } from '../types';
+import { AttendanceSession, ClassGroup, Student, AttendanceStatus, AuthUser, TimetableSlot, Holiday } from '../types';
 import { generateParentAlertMessage, shareToWhatsApp } from '../utils/whatsapp';
-import { formatDateWithDay, formatDateShort, getDayOfWeek } from '../utils/dateUtils';
+import { formatDateWithDay, formatDateShort, getDayOfWeek, getTodayDateStr, getHolidayForDate } from '../utils/dateUtils';
 import { getNextLectureDateForUser } from '../utils/teacherFilter';
-import { webauthnService } from '../services/webauthnService';
 
 interface LiveDashboardProps {
   session: AttendanceSession;
@@ -60,7 +59,9 @@ interface LiveDashboardProps {
   onSelectLectureSlot?: (slotId: string) => void;
   onNavigateToTimetable?: () => void;
   onSelectDate?: (date: string) => void;
-  onOpenBiometrics?: () => void;
+  holidays?: Holiday[];
+  onDeclareHoliday?: (dateStr: string, title: string) => void;
+  onRemoveHoliday?: (dateStr: string) => void;
 }
 
 export const LiveDashboard: React.FC<LiveDashboardProps> = ({
@@ -84,7 +85,9 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
   onSelectLectureSlot,
   onNavigateToTimetable,
   onSelectDate,
-  onOpenBiometrics
+  holidays = [],
+  onDeclareHoliday,
+  onRemoveHoliday
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'present' | 'absent' | 'late' | 'unmarked'>('all');
@@ -93,25 +96,14 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
   const [attendanceMode, setAttendanceMode] = useState<'normal' | 'manual-roll'>('normal');
   const [manualRollInput, setManualRollInput] = useState('');
   const [rollFeedback, setRollFeedback] = useState<{ message: string; type: 'success' | 'error'; student?: Student } | null>(null);
+  const [isDeclareHolidayModalOpen, setIsDeclareHolidayModalOpen] = useState(false);
+  const [holidayTitleInput, setHolidayTitleInput] = useState('');
 
-  const [isTeacherBiometricEnrolled, setIsTeacherBiometricEnrolled] = useState(false);
-
-  // Check if current faculty has enrolled their biometric on this system
-  useEffect(() => {
-    if (!currentUser) return;
-    const checkEnroll = async () => {
-      try {
-        const userId = currentUser.uniqueCode || currentUser.id;
-        const list = await webauthnService.getCredentials(userId, 'teacher');
-        setIsTeacherBiometricEnrolled(list.length > 0);
-      } catch {
-        setIsTeacherBiometricEnrolled(false);
-      }
-    };
-    checkEnroll();
-  }, [currentUser]);
-
+  const selectedDateHoliday = useMemo(() => {
+    return getHolidayForDate(selectedDate, holidays);
+  }, [holidays, selectedDate]);
   const dayOfWeek = getDayOfWeek(selectedDate);
+  const isFutureDate = selectedDate > getTodayDateStr();
   const nextLectureDate = useMemo(() => {
     return getNextLectureDateForUser(selectedDate, currentUser, timetable, currentClass?.id);
   }, [selectedDate, currentUser, timetable, currentClass?.id]);
@@ -416,9 +408,208 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
   };
 
   // =========================================================================
-  // CASE 1: NO LECTURE ON THIS DATE (Requirement: "if i click on date and if
-  // there is lecture on that day then only teacher should be able to take
-  // attendance otherwise there is no lecture tody")
+  // CASE 0A: DECLARED HOLIDAY (PAST, PRESENT, OR FUTURE)
+  // =========================================================================
+  if (selectedDateHoliday) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-gradient-to-br from-amber-500 via-amber-600 to-amber-700 text-white rounded-3xl p-8 sm:p-12 text-center space-y-6 shadow-xl border border-amber-400 max-w-2xl mx-auto my-6 animate-gentle-pop">
+          <div className="w-20 h-20 rounded-3xl bg-white/20 backdrop-blur-md flex items-center justify-center mx-auto text-4xl shadow-inner border border-white/30">
+            🏖️
+          </div>
+
+          <div className="space-y-2">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/20 text-amber-100 text-xs font-black uppercase tracking-wider">
+              Official Declared Holiday
+            </span>
+
+            <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+              {selectedDateHoliday.title}
+            </h2>
+
+            <p className="text-sm font-semibold text-amber-100">
+              {formatDateWithDay(selectedDate, dayOfWeek)}
+              {selectedDateHoliday.declaredBy ? ` • Declared by ${selectedDateHoliday.declaredBy}` : ''}
+            </p>
+
+            <p className="text-xs sm:text-sm text-amber-100/90 max-w-lg mx-auto leading-relaxed pt-1">
+              This date has been declared as an official campus holiday. Regular lectures and attendance are suspended for this day.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+            {onRemoveHoliday && (
+              <button
+                type="button"
+                onClick={() => onRemoveHoliday(selectedDate)}
+                className="px-4 py-2.5 rounded-xl bg-white hover:bg-rose-50 text-rose-700 text-xs font-black transition-all shadow-md active:scale-95 flex items-center gap-1.5 cursor-pointer border border-rose-200"
+              >
+                <Trash2 className="w-4 h-4 text-rose-600" />
+                <span>Remove Holiday Declaration</span>
+              </button>
+            )}
+
+            {onSelectDate && (
+              <button
+                type="button"
+                onClick={() => onSelectDate(getTodayDateStr())}
+                className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-all shadow-md flex items-center gap-2 cursor-pointer active:scale-95"
+              >
+                <Sparkles className="w-4 h-4 text-emerald-300" />
+                <span>Return to Today ({formatDateShort(getTodayDateStr())})</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // =========================================================================
+  // CASE 0B: FUTURE / UPCOMING DATE SELECTED - BLOCK ATTENDANCE
+  // =========================================================================
+  if (isFutureDate) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-white rounded-3xl border-2 border-sky-200/90 p-8 sm:p-12 text-center space-y-6 shadow-sm max-w-2xl mx-auto my-6">
+          <div className="w-18 h-18 rounded-3xl bg-sky-50 border border-sky-200 text-sky-700 flex items-center justify-center mx-auto shadow-inner">
+            <CalendarIcon className="w-9 h-9" />
+          </div>
+
+          <div className="space-y-2">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-sky-100 text-sky-900 border border-sky-200 text-xs font-black uppercase tracking-wider">
+              <AlertCircle className="w-3.5 h-3.5 text-sky-700" />
+              <span>Upcoming Date Selected</span>
+            </div>
+
+            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+              Future Date Selected
+            </h2>
+
+            <p className="text-sm font-semibold text-slate-700">
+              {formatDateWithDay(selectedDate, dayOfWeek)}
+            </p>
+
+            <p className="text-xs sm:text-sm text-slate-600 max-w-lg mx-auto leading-relaxed pt-1">
+              Attendance logs cannot be recorded for future dates. You can only record attendance for today or view past conducted lectures.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+            {onDeclareHoliday && (
+              <button
+                type="button"
+                onClick={() => {
+                  setHolidayTitleInput('');
+                  setIsDeclareHolidayModalOpen(true);
+                }}
+                className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-black transition-all shadow-xs flex items-center gap-2 cursor-pointer active:scale-95 border border-amber-400"
+              >
+                <span>🏖️</span>
+                <span>Declare {formatDateShort(selectedDate)} as Holiday</span>
+              </button>
+            )}
+
+            {onSelectDate && (
+              <button
+                type="button"
+                onClick={() => onSelectDate(getTodayDateStr())}
+                className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-xs flex items-center gap-2 cursor-pointer active:scale-95"
+              >
+                <Sparkles className="w-4 h-4 text-emerald-200" />
+                <span>Return to Today ({formatDateShort(getTodayDateStr())})</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* MODAL: DECLARE HOLIDAY */}
+        {isDeclareHolidayModalOpen && (
+          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-5 animate-gentle-pop">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-50 text-amber-700 border border-amber-200 flex items-center justify-center text-xl shadow-inner">
+                    🏖️
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-slate-900">Declare Official Holiday</h3>
+                    <p className="text-xs text-slate-500 font-semibold">{formatDateWithDay(selectedDate)}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsDeclareHolidayModalOpen(false)}
+                  className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <label className="block text-xs font-extrabold text-slate-700">
+                  Holiday Title / Occasion
+                </label>
+
+                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                  {[
+                    'Institutional Holiday',
+                    'Public / Festival Holiday',
+                    'College Annual Day / Event',
+                    'Departmental Event',
+                    'Semester Vacation'
+                  ].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setHolidayTitleInput(preset)}
+                      className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-[11px] font-bold transition-all cursor-pointer"
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+
+                <input
+                  type="text"
+                  value={holidayTitleInput}
+                  onChange={(e) => setHolidayTitleInput(e.target.value)}
+                  placeholder="Enter holiday title e.g. Ganesh Chaturthi"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-2xl px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsDeclareHolidayModalOpen(false)}
+                  className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onDeclareHoliday) {
+                      onDeclareHoliday(selectedDate, holidayTitleInput || 'Declared Official Holiday');
+                    }
+                    setIsDeclareHolidayModalOpen(false);
+                  }}
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-b from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-white text-xs font-black transition-all shadow-md active:scale-95 cursor-pointer"
+                >
+                  Declare Holiday
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // =========================================================================
+  // CASE 1: NO LECTURE ON THIS DATE
   // =========================================================================
   if (!hasLectureOnDate) {
     return (
@@ -451,6 +642,20 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
 
           {/* Quick Jump Action Buttons */}
           <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+            {onDeclareHoliday && (
+              <button
+                type="button"
+                onClick={() => {
+                  setHolidayTitleInput('');
+                  setIsDeclareHolidayModalOpen(true);
+                }}
+                className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-black transition-all shadow-xs flex items-center gap-2 cursor-pointer active:scale-95 border border-amber-400"
+              >
+                <span>🏖️</span>
+                <span>Declare {formatDateShort(selectedDate)} as Holiday</span>
+              </button>
+            )}
+
             {onNavigateToTimetable && (
               <button
                 type="button"
@@ -476,51 +681,96 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
             {onSelectDate && (
               <button
                 type="button"
-                onClick={() => {
-                  const today = new Date();
-                  const yyyy = today.getFullYear();
-                  const mm = String(today.getMonth() + 1).padStart(2, '0');
-                  const dd = String(today.getDate()).padStart(2, '0');
-                  onSelectDate(`${yyyy}-${mm}-${dd}`);
-                }}
+                onClick={() => onSelectDate(getTodayDateStr())}
                 className="px-3.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all cursor-pointer"
               >
                 Jump to Today
               </button>
             )}
-
-            {currentUser?.role === 'teacher' && onOpenBiometrics && (
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={onOpenBiometrics}
-                  className="px-3.5 py-2.5 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
-                  title="Manage personal biometric fingerprint"
-                >
-                  <Fingerprint className="w-4 h-4 text-sky-600" />
-                  <span>{isTeacherBiometricEnrolled ? 'Biometric ID Active' : 'Enroll My Fingerprint'}</span>
-                </button>
-                {isTeacherBiometricEnrolled && (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const userId = currentUser.uniqueCode || currentUser.id;
-                      const res = await webauthnService.clearCredentials(userId, 'teacher');
-                      if (res.success) {
-                        setIsTeacherBiometricEnrolled(false);
-                      }
-                    }}
-                    className="px-3 py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold transition-all flex items-center gap-1 cursor-pointer active:scale-95"
-                    title="Clear enrolled fingerprint"
-                  >
-                    <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-                    <span>Clear Fingerprint</span>
-                  </button>
-                )}
-              </div>
-            )}
           </div>
         </div>
+
+        {/* MODAL: DECLARE HOLIDAY */}
+        {isDeclareHolidayModalOpen && (
+          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-5 animate-gentle-pop">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-50 text-amber-700 border border-amber-200 flex items-center justify-center text-xl shadow-inner">
+                    🏖️
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-slate-900">Declare Official Holiday</h3>
+                    <p className="text-xs text-slate-500 font-semibold">{formatDateWithDay(selectedDate)}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsDeclareHolidayModalOpen(false)}
+                  className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <label className="block text-xs font-extrabold text-slate-700">
+                  Holiday Title / Occasion
+                </label>
+
+                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                  {[
+                    'Institutional Holiday',
+                    'Public / Festival Holiday',
+                    'College Annual Day / Event',
+                    'Departmental Event',
+                    'Semester Vacation'
+                  ].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setHolidayTitleInput(preset)}
+                      className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-[11px] font-bold transition-all cursor-pointer"
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+
+                <input
+                  type="text"
+                  value={holidayTitleInput}
+                  onChange={(e) => setHolidayTitleInput(e.target.value)}
+                  placeholder="Enter holiday title e.g. Ganesh Chaturthi"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-2xl px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsDeclareHolidayModalOpen(false)}
+                  className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onDeclareHoliday) {
+                      onDeclareHoliday(selectedDate, holidayTitleInput || 'Declared Official Holiday');
+                    }
+                    setIsDeclareHolidayModalOpen(false);
+                  }}
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-b from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-white text-xs font-black transition-all shadow-md active:scale-95 cursor-pointer"
+                >
+                  Declare Holiday
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -618,26 +868,6 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                 <GraduationCap className="w-3.5 h-3.5 text-sky-600 shrink-0" />
                 <span>Class: <strong className="text-slate-900 font-bold">{currentLecture.className || currentClass.name}</strong></span>
               </span>
-
-              {/* Biometric Button */}
-              {currentUser?.role === 'teacher' && onOpenBiometrics && (
-                <>
-                  <span className="text-slate-300 hidden sm:inline">&bull;</span>
-                  <button
-                    type="button"
-                    onClick={onOpenBiometrics}
-                    className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-[11px] font-bold transition-all cursor-pointer select-none active:scale-95 shadow-2xs ${
-                      isTeacherBiometricEnrolled
-                        ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
-                        : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
-                    }`}
-                    title="Biometric Fingerprint Authentication"
-                  >
-                    <Fingerprint className="w-3.5 h-3.5 text-sky-600" />
-                    <span>{isTeacherBiometricEnrolled ? 'Biometric ID Active' : 'Enroll Fingerprint'}</span>
-                  </button>
-                </>
-              )}
             </div>
 
             {/* Multiple Lecture Slots Switcher (if teacher has >1 lecture today) */}

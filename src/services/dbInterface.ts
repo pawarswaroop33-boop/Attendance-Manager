@@ -5,7 +5,8 @@ import {
   Teacher, 
   Classroom, 
   TimetableSlot, 
-  SystemSettings 
+  SystemSettings,
+  Holiday
 } from '../types';
 
 export interface CampusState {
@@ -16,6 +17,7 @@ export interface CampusState {
   classrooms: Classroom[];
   timetable: TimetableSlot[];
   sessions: AttendanceSession[];
+  holidays?: Holiday[];
 }
 
 export type DatabaseProviderType = 'firebase' | 'supabase';

@@ -12,8 +12,7 @@ import {
   Cloud, 
   GraduationCap, 
   Sparkles,
-  ClipboardList,
-  Fingerprint
+  ClipboardList
 } from 'lucide-react';
 import { ClassGroup, AuthUser, SystemSettings } from '../types';
 import { DYPatilLogo } from './DYPatilLogo';
@@ -30,7 +29,6 @@ interface HeaderProps {
   onDateChange: (date: string) => void;
   onOpenWhatsApp: () => void;
   onOpenImportModal: () => void;
-  onOpenBiometrics?: () => void;
   savedIndicator: boolean;
   totalPresent: number;
   totalStudents: number;
@@ -53,7 +51,6 @@ export const Header: React.FC<HeaderProps> = ({
   selectedDate,
   onDateChange,
   onOpenImportModal,
-  onOpenBiometrics,
   savedIndicator,
   totalPresent,
   totalStudents,

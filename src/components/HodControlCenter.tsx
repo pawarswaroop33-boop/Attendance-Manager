@@ -46,11 +46,11 @@ import {
   DayOfWeek, 
   Student, 
   AttendanceSession,
-  AuthUser 
+  AuthUser,
+  Holiday
 } from '../types';
 import { dbService } from '../services/databaseService';
 import { sha256Hex, evaluatePasswordStrength, sanitizeUsername } from '../utils/crypto';
-import { webauthnService } from '../services/webauthnService';
 import { AttendanceCalendar } from './AttendanceCalendar';
 import { formatDateShort, isLegacyDummySession } from '../utils/dateUtils';
 
@@ -93,6 +93,9 @@ interface HodControlCenterProps {
   sessions?: AttendanceSession[];
   onClearDateAttendance?: (dateStr: string) => void;
   onClearSession?: (sessionId: string) => void;
+  holidays?: Holiday[];
+  onDeclareHoliday?: (dateStr: string, title: string) => void;
+  onRemoveHoliday?: (dateStr: string) => void;
 }
 
 export const HodControlCenter: React.FC<HodControlCenterProps> = ({
@@ -124,7 +127,10 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
   isCloudSyncing,
   sessions = [],
   onClearDateAttendance,
-  onClearSession
+  onClearSession,
+  holidays,
+  onDeclareHoliday,
+  onRemoveHoliday
 }) => {
   // Sidebar Navigation State
   const [activeSection, setActiveSection] = useState<HodSidebarSection>('students');
@@ -217,21 +223,6 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
   const [showResetSettingsModal, setShowResetSettingsModal] = useState(false);
   const [showDeleteAllStudentsModal, setShowDeleteAllStudentsModal] = useState(false);
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
-
-  // Biometric status
-  const [isHodBiometricEnrolled, setIsHodBiometricEnrolled] = useState(false);
-
-  useEffect(() => {
-    const checkHodEnroll = async () => {
-      try {
-        const list = await webauthnService.getCredentials(undefined, 'hod');
-        setIsHodBiometricEnrolled(list.length > 0);
-      } catch {
-        setIsHodBiometricEnrolled(false);
-      }
-    };
-    checkHodEnroll();
-  }, [settings.hodUsername]);
 
   // Synchronize settings
   useEffect(() => {
@@ -1412,6 +1403,9 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
                 onClearSession={onClearSession}
                 currentUser={hodUser}
                 timetable={timetable}
+                holidays={holidays}
+                onDeclareHoliday={onDeclareHoliday}
+                onRemoveHoliday={onRemoveHoliday}
               />
             </div>
           </div>
@@ -1849,78 +1843,29 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
               </form>
             </div>
 
-            {/* CARD 3: CLOUD DATABASE SYNC & BIOMETRICS */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Cloud Sync Card */}
-              <div className="bg-white rounded-3xl border border-slate-200/90 p-5 shadow-sm space-y-3.5">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-10 h-10 rounded-2xl bg-sky-50 text-sky-600 flex items-center justify-center border border-sky-200">
-                    <Cloud className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900">Cloud Database Sync</h3>
-                    <p className="text-[11px] text-slate-500">Real-time bi-directional persistence</p>
-                  </div>
+            {/* CARD 3: CLOUD DATABASE SYNC */}
+            <div className="bg-white rounded-3xl border border-slate-200/90 p-5 shadow-sm space-y-3.5 max-w-xl">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-sky-50 text-sky-600 flex items-center justify-center border border-sky-200">
+                  <Cloud className="w-5 h-5" />
                 </div>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  All attendance sessions, timetable matrix, and student rosters are backed up to the live cloud database.
-                </p>
-                <button
-                  type="button"
-                  onClick={onForceSyncCloud}
-                  disabled={isCloudSyncing}
-                  className="w-full py-2.5 rounded-2xl bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <Cloud className={`w-4 h-4 ${isCloudSyncing ? 'animate-pulse' : ''}`} />
-                  <span>{isCloudSyncing ? 'Syncing to Cloud...' : 'Force Sync to Cloud Database'}</span>
-                </button>
-              </div>
-
-              {/* Hardware Biometric Auth Card */}
-              <div className="bg-white rounded-3xl border border-slate-200/90 p-5 shadow-sm space-y-3.5">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-200">
-                    <Fingerprint className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900">Hardware Biometric Authentication</h3>
-                    <p className="text-[11px] text-slate-500">Touch ID / Windows Hello WebAuthn</p>
-                  </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Cloud Database Sync</h3>
+                  <p className="text-[11px] text-slate-500">Real-time bi-directional persistence</p>
                 </div>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  Status: <strong className={isHodBiometricEnrolled ? 'text-emerald-700' : 'text-slate-600'}>
-                    {isHodBiometricEnrolled ? '✓ Biometrics Active for HOD' : 'Not yet enrolled'}
-                  </strong>
-                </p>
-                {onOpenBiometrics && (
-                  <div className="space-y-2">
-                    <button
-                      type="button"
-                      onClick={onOpenBiometrics}
-                      className="w-full py-2.5 rounded-2xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                    >
-                      <Fingerprint className="w-4 h-4 text-emerald-600" />
-                      <span>{isHodBiometricEnrolled ? 'Manage / Test Biometric Key' : 'Enroll Fingerprint / Face ID'}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const ok = await webauthnService.clearCredentials(undefined, 'hod');
-                        if (ok.success) {
-                          setIsHodBiometricEnrolled(false);
-                          setCredentialSuccess('HOD enrolled biometric fingerprints cleared successfully.');
-                          setTimeout(() => setCredentialSuccess(''), 4000);
-                        }
-                      }}
-                      className="w-full py-2 rounded-xl text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-rose-200 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
-                    >
-                      <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-                      <span>Clear Enrolled Fingerprint</span>
-                    </button>
-                  </div>
-                )}
               </div>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                All attendance sessions, timetable matrix, and student rosters are backed up to the live cloud database.
+              </p>
+              <button
+                type="button"
+                onClick={onForceSyncCloud}
+                disabled={isCloudSyncing}
+                className="w-full py-2.5 rounded-2xl bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Cloud className={`w-4 h-4 ${isCloudSyncing ? 'animate-pulse' : ''}`} />
+                <span>{isCloudSyncing ? 'Syncing to Cloud...' : 'Force Sync to Cloud Database'}</span>
+              </button>
             </div>
 
           </div>

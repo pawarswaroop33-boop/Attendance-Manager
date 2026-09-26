@@ -8,14 +8,12 @@ import {
   EyeOff, 
   GraduationCap,
   KeyRound,
-  Fingerprint,
   ShieldCheck,
   Clock
 } from 'lucide-react';
 import { AuthUser, Teacher, SystemSettings } from '../types';
 import { StudentStudyIllustration } from './StudentStudyIllustration';
 import { DYPatilLogo } from './DYPatilLogo';
-import { BiometricAuthModal } from './BiometricAuthModal';
 import { sha256Hex } from '../utils/crypto';
 import { authService } from '../services/authService';
 
@@ -38,7 +36,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const [isBiometricModalOpen, setIsBiometricModalOpen] = useState(false);
   const [activeRoleMode, setActiveRoleMode] = useState<'teacher' | 'hod'>('teacher');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -390,52 +387,25 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             </button>
           </label>
 
-          {/* Sign In & Hardware Biometric Row */}
-          <div className="flex items-center justify-between gap-2 pt-2 pb-1">
-            {/* System Hardware Biometric Unlock Button */}
+          {/* Sign In Row */}
+          <div className="flex items-center justify-end gap-3 pt-2 pb-1">
+            <span className="text-sm sm:text-base font-bold text-slate-700">
+              Sign In
+            </span>
             <button
-              id="button-biometric-unlock"
-              type="button"
-              disabled={isLockedOut}
-              onClick={() => setIsBiometricModalOpen(true)}
-              className="group flex items-center gap-1.5 py-2 px-3.5 rounded-full bg-slate-100/90 hover:bg-sky-50 border border-slate-200/90 hover:border-sky-300 text-slate-700 hover:text-sky-700 text-xs font-bold transition-all duration-200 shadow-2xs hover:shadow-xs active:scale-95 cursor-pointer select-none disabled:opacity-50"
-              title={`Unlock using WebAuthn Biometrics for ${activeRoleMode === 'hod' ? 'HOD' : 'Faculty'}`}
+              id="button-submit-signin"
+              type="submit"
+              disabled={isLockedOut || isSubmitting}
+              className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-gradient-to-b from-amber-400 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-600 hover:scale-105 active:scale-90 active:translate-y-0.5 border-t border-amber-300 border-b-2 border-b-amber-600 shadow-[0_6px_16px_-2px_rgba(245,158,11,0.45),0_2px_4px_rgba(0,0,0,0.08)] active:shadow-[0_2px_6px_rgba(245,158,11,0.3)] text-white flex items-center justify-center transition-all duration-200 ease-out cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
+              title="Sign In"
             >
-              <Fingerprint className="w-4 h-4 text-sky-600 transition-transform duration-200 group-hover:scale-110" />
-              <span>Biometric ({activeRoleMode === 'hod' ? 'HOD' : 'Faculty'})</span>
+              <ArrowRight className="w-5 h-5 text-white stroke-[2.8] transition-transform duration-200 group-hover:translate-x-0.5" />
             </button>
-
-            {/* Standard Sign In Button */}
-            <div className="flex items-center gap-3">
-              <span className="text-sm sm:text-base font-bold text-slate-700">
-                Sign In
-              </span>
-              <button
-                id="button-submit-signin"
-                type="submit"
-                disabled={isLockedOut || isSubmitting}
-                className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-gradient-to-b from-amber-400 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-600 hover:scale-105 active:scale-90 active:translate-y-0.5 border-t border-amber-300 border-b-2 border-b-amber-600 shadow-[0_6px_16px_-2px_rgba(245,158,11,0.45),0_2px_4px_rgba(0,0,0,0.08)] active:shadow-[0_2px_6px_rgba(245,158,11,0.3)] text-white flex items-center justify-center transition-all duration-200 ease-out cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
-                title="Sign In"
-              >
-                <ArrowRight className="w-5 h-5 text-white stroke-[2.8] transition-transform duration-200 group-hover:translate-x-0.5" />
-              </button>
-            </div>
           </div>
 
         </form>
 
       </div>
-
-      {/* ================= MODAL: SYSTEM HARDWARE BIOMETRIC UNLOCK ================= */}
-      <BiometricAuthModal
-        isOpen={isBiometricModalOpen}
-        onClose={() => setIsBiometricModalOpen(false)}
-        activeRoleMode={activeRoleMode}
-        enteredUsername={username}
-        teachers={teachers}
-        settings={settings}
-        onLoginSuccess={onLoginSuccess}
-      />
 
       {/* Footer Tagline */}
       <footer className="mt-5 text-center text-[11px] text-slate-400 font-medium flex items-center justify-center gap-1.5">

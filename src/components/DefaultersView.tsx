@@ -13,7 +13,7 @@ import {
   Lock,
   Filter
 } from 'lucide-react';
-import { Student, ClassGroup, AttendanceSession, SystemSettings, AuthUser, TimetableSlot } from '../types';
+import { Student, ClassGroup, AttendanceSession, SystemSettings, AuthUser, TimetableSlot, Holiday } from '../types';
 import { getDayOfWeek, formatDateShort, formatDateWithDay, getSessionStats, isLegacyDummySession } from '../utils/dateUtils';
 import { AttendanceCalendar } from './AttendanceCalendar';
 import { isSessionBelongsToTeacher } from '../utils/teacherFilter';
@@ -31,6 +31,9 @@ interface DefaultersViewProps {
   onOpenWhatsAppModal?: () => void;
   onClearDateAttendance?: (dateStr: string) => void;
   onClearSession?: (sessionId: string) => void;
+  holidays?: Holiday[];
+  onDeclareHoliday?: (dateStr: string, title: string) => void;
+  onRemoveHoliday?: (dateStr: string) => void;
 }
 
 export const DefaultersView: React.FC<DefaultersViewProps> = ({
@@ -45,7 +48,10 @@ export const DefaultersView: React.FC<DefaultersViewProps> = ({
   onNavigateToSession,
   onOpenWhatsAppModal,
   onClearDateAttendance,
-  onClearSession
+  onClearSession,
+  holidays,
+  onDeclareHoliday,
+  onRemoveHoliday
 }) => {
   const [threshold, setThreshold] = useState<number>(settings.defaulterThreshold || 50);
   
@@ -492,6 +498,9 @@ export const DefaultersView: React.FC<DefaultersViewProps> = ({
           onClearSession={onClearSession}
           currentUser={currentUser}
           timetable={timetable}
+          holidays={holidays}
+          onDeclareHoliday={onDeclareHoliday}
+          onRemoveHoliday={onRemoveHoliday}
         />
 
       </div>
