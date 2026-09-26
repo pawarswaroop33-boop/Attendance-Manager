@@ -32,7 +32,7 @@ import { HodControlCenter } from './components/HodControlCenter';
 import { ImportStudentsModal } from './components/ImportStudentsModal';
 import { WhatsAppShareModal } from './components/WhatsAppShareModal';
 import { BiometricEnrollModal } from './components/BiometricEnrollModal';
-import { getDayOfWeek, isLegacyDummySession } from './utils/dateUtils';
+import { getDayOfWeek, isLegacyDummySession, isValidRecordedSession } from './utils/dateUtils';
 import { authService } from './services/authService';
 import { 
   isSlotBelongsToTeacher, 
@@ -176,15 +176,15 @@ export default function App() {
     return INITIAL_STUDENTS;
   });
 
-  // 8. Attendance Sessions (Starts empty by default so zero lectures are shown until created)
+  // 8. Attendance Sessions (Starts empty by default so zero dummy/mock lectures exist)
   const [sessions, setSessions] = useState<AttendanceSession[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_SESSIONS);
       if (saved !== null) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          // Filter out any legacy dummy auto-generated sessions
-          const cleaned = parsed.filter(s => !isLegacyDummySession(s));
+          // Filter strictly valid recorded sessions only
+          const cleaned = parsed.filter(isValidRecordedSession);
           if (cleaned.length !== parsed.length) {
             try {
               localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(cleaned));
@@ -358,8 +358,8 @@ export default function App() {
           if (cloudState.timetable && cloudState.timetable.length > 0) setTimetable(cloudState.timetable);
           
           // Non-destructively merge clean local real sessions with clean cloud real sessions
-          const cleanLocalSessions = (sessions || []).filter(s => !isLegacyDummySession(s));
-          const cleanCloudSessions = (cloudState.sessions || []).filter(s => !isLegacyDummySession(s));
+          const cleanLocalSessions = (sessions || []).filter(isValidRecordedSession);
+          const cleanCloudSessions = (cloudState.sessions || []).filter(isValidRecordedSession);
 
           const sessionMap = new Map<string, AttendanceSession>();
           cleanLocalSessions.forEach(s => {
@@ -383,7 +383,7 @@ export default function App() {
           setSessions(mergedSessions);
 
           // If the cloud state contained dummy sessions or local had newer sessions, sync the merged real sessions
-          const hadDummySessions = Boolean(cloudState.sessions && cloudState.sessions.some(s => isLegacyDummySession(s)));
+          const hadDummySessions = Boolean(cloudState.sessions && cloudState.sessions.some(s => !isValidRecordedSession(s)));
           const hadMissingRealSessions = mergedSessions.length > cleanCloudSessions.length;
           if (hadDummySessions || hadMissingRealSessions) {
             try {
@@ -527,7 +527,8 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(sessions));
+      const clean = sessions.filter(s => !isLegacyDummySession(s));
+      localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(clean));
     } catch (e) {
       console.error(e);
     }

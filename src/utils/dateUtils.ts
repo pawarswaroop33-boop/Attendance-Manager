@@ -38,20 +38,48 @@ export const formatDateKey = (year: number, monthIndex: number, day: number): st
 };
 
 /**
- * Parses YYYY-MM-DD to year, monthIndex (0-11), and day (1-31)
+ * A session is considered a valid recorded attendance session if and only if:
+ * 1. It is a valid session object.
+ * 2. It has been explicitly registered/saved by a user (isRealSession === true || isRegistered === true)
+ *    OR it has at least 1 student marked with a status other than 'unmarked' (present, absent, late, excused).
+ * 3. It contains no dummy, mock, or auto-generated template indicators.
  */
-export const isLegacyDummySession = (session: any): boolean => {
+export const isValidRecordedSession = (session: any): boolean => {
   if (!session || typeof session !== 'object') return false;
-  // If explicitly flagged as registered/real by user actions, never treat as dummy
-  if (session.isRegistered === true || session.isRealSession === true) {
+  if (session.isDummy === true) return false;
+
+  const id = String(session.id || '').toLowerCase();
+  const name = String(session.sessionName || '').toLowerCase();
+  const teacher = String(session.teacherName || '').toLowerCase();
+  const remarks = String(session.remarks || '').toLowerCase();
+
+  if (id.includes('dummy') || id.includes('mock') || id.includes('sample') || id.includes('test_sess')) {
     return false;
   }
-  const remarks = String(session.remarks || '');
-  // Specifically matches old mock auto-generator remarks template
-  if (remarks.startsWith('Conducted lecture on') && remarks.includes('for Electronics and Computer Engineering.')) {
+  if (name.includes('dummy') || name.includes('mock') || name.includes('sample') || name.includes('auto-generated')) {
+    return false;
+  }
+  if (teacher.includes('dummy') || teacher.includes('system auto')) {
+    return false;
+  }
+  if (remarks.includes('conducted lecture on') || remarks.includes('dummy') || remarks.includes('mock session')) {
+    return false;
+  }
+
+  if (session.isRealSession === true || session.isRegistered === true) {
     return true;
   }
-  return false;
+
+  const records = session.records || {};
+  const recordValues = Object.values(records) as any[];
+  return recordValues.some(r => r && typeof r === 'object' && r.status && r.status !== 'unmarked');
+};
+
+/**
+ * Returns true if a session is invalid, dummy, mock, or unrecorded template.
+ */
+export const isLegacyDummySession = (session: any): boolean => {
+  return !isValidRecordedSession(session);
 };
 
 export const parseDateKey = (dateStr: string): { year: number; monthIndex: number; day: number } => {

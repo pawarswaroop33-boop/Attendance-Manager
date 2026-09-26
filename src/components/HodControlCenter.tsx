@@ -52,7 +52,7 @@ import { dbService } from '../services/databaseService';
 import { sha256Hex, evaluatePasswordStrength, sanitizeUsername } from '../utils/crypto';
 import { webauthnService } from '../services/webauthnService';
 import { AttendanceCalendar } from './AttendanceCalendar';
-import { formatDateShort } from '../utils/dateUtils';
+import { formatDateShort, isLegacyDummySession } from '../utils/dateUtils';
 
 export type HodSidebarSection = 
   | 'students' 
@@ -522,14 +522,19 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
     return [selectedTimetableDay];
   }, [selectedTimetableDay, DAYS_LIST]);
 
+  // Strip any dummy or mock sessions
+  const cleanSessions = useMemo(() => {
+    return sessions.filter(s => !isLegacyDummySession(s));
+  }, [sessions]);
+
   // Department Analytics Calculations
   const analyticsData = useMemo(() => {
-    const totalSessions = sessions.length;
+    const totalSessions = cleanSessions.length;
     let totalMarks = 0;
     let presentMarks = 0;
     let absentMarks = 0;
 
-    sessions.forEach(sess => {
+    cleanSessions.forEach(sess => {
       Object.values(sess?.records || {}).forEach(rec => {
         if (rec && rec.status !== 'unmarked') {
           totalMarks++;
@@ -548,7 +553,7 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
     students.forEach(st => {
       let stTotal = 0;
       let stAttended = 0;
-      sessions.forEach(sess => {
+      cleanSessions.forEach(sess => {
         const r = sess?.records?.[st.id];
         if (r && r.status !== 'unmarked') {
           stTotal++;
@@ -760,7 +765,7 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
                 <div className="px-2 py-1 text-[10px] font-black uppercase tracking-wider text-slate-400">
                   Audit & Records
                 </div>
-                {renderNavButton('attendance_log', 'Attendance Logs', ClipboardList, sessions.length)}
+                {renderNavButton('attendance_log', 'Attendance Logs', ClipboardList, cleanSessions.length)}
                 {renderNavButton('analytics', 'Department Analytics', BarChart3)}
               </div>
 
@@ -1395,7 +1400,7 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
             {/* Embedded Attendance Calendar for HOD */}
             <div className="w-full min-w-0">
               <AttendanceCalendar
-                sessions={sessions}
+                sessions={cleanSessions}
                 classes={classes}
                 students={students}
                 settings={settings}

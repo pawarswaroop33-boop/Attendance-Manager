@@ -14,6 +14,7 @@ import {
 import { AttendanceSession, ClassGroup, Student, AuthUser, TimetableSlot } from '../types';
 import { generateAnalyticsReportMessage, generateDefaulterWarningMessage, shareToWhatsApp } from '../utils/whatsapp';
 import { isSessionBelongsToTeacher } from '../utils/teacherFilter';
+import { isLegacyDummySession } from '../utils/dateUtils';
 
 interface AnalyticsViewProps {
   sessions: AttendanceSession[];
@@ -42,9 +43,10 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
 
   const rawStudents = allStudents.length > 0 ? allStudents : students;
 
-  // Filter sessions strictly for the current class and logged-in teacher (if applicable)
+  // Filter sessions strictly for the current class and logged-in teacher (if applicable), excluding dummy sessions
   const classSessions = useMemo(() => {
     return sessions
+      .filter(s => !isLegacyDummySession(s))
       .filter(s => s.classId === currentClass.id)
       .filter(s => {
         if (currentUser?.role === 'teacher') {

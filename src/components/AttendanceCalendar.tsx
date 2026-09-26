@@ -36,7 +36,8 @@ import {
   DAYS_SHORT,
   getCalendarMonthGrid,
   parseDateKey,
-  formatDateKey
+  formatDateKey,
+  isLegacyDummySession
 } from '../utils/dateUtils';
 import { getLecturesForDateAndUser } from '../utils/teacherFilter';
 
@@ -94,10 +95,11 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
   const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
   const [sessionRosterTab, setSessionRosterTab] = useState<'absent' | 'present' | 'all'>('absent');
 
-  // Filter sessions by class
+  // Filter sessions by class and strip dummy/mock sessions
   const classFilteredSessions = useMemo(() => {
-    if (selectedClassFilter === 'all') return sessions;
-    return sessions.filter(s => s.classId === selectedClassFilter);
+    const clean = sessions.filter(s => !isLegacyDummySession(s));
+    if (selectedClassFilter === 'all') return clean;
+    return clean.filter(s => s.classId === selectedClassFilter);
   }, [sessions, selectedClassFilter]);
 
   // Group sessions by date string (YYYY-MM-DD)

@@ -14,7 +14,7 @@ import {
   Filter
 } from 'lucide-react';
 import { Student, ClassGroup, AttendanceSession, SystemSettings, AuthUser, TimetableSlot } from '../types';
-import { getDayOfWeek, formatDateShort, formatDateWithDay, getSessionStats } from '../utils/dateUtils';
+import { getDayOfWeek, formatDateShort, formatDateWithDay, getSessionStats, isLegacyDummySession } from '../utils/dateUtils';
 import { AttendanceCalendar } from './AttendanceCalendar';
 import { isSessionBelongsToTeacher } from '../utils/teacherFilter';
 
@@ -70,18 +70,19 @@ export const DefaultersView: React.FC<DefaultersViewProps> = ({
     return Array.from(facultyMap.entries()).map(([id, name]) => ({ id, name }));
   }, [sessions]);
 
-  // Scoped sessions: if teacher, strictly their own sessions; if HOD, all or filtered by selected teacher
+  // Scoped sessions: exclude dummy sessions; if teacher, strictly their own sessions; if HOD, all or filtered by selected teacher
   const scopedSessions = useMemo(() => {
+    const clean = sessions.filter(s => !isLegacyDummySession(s));
     if (currentUser?.role === 'teacher') {
-      return sessions.filter(s => isSessionBelongsToTeacher(s, currentUser, timetable));
+      return clean.filter(s => isSessionBelongsToTeacher(s, currentUser, timetable));
     }
     if (userRole === 'hod' && hodTeacherFilter !== 'all') {
-      return sessions.filter(s => 
+      return clean.filter(s => 
         (s.teacherId && s.teacherId === hodTeacherFilter) ||
         (s.teacherName && s.teacherName.toLowerCase().includes(hodTeacherFilter.toLowerCase()))
       );
     }
-    return sessions;
+    return clean;
   }, [sessions, currentUser, timetable, userRole, hodTeacherFilter]);
 
   // 1. Process Taken Attendance Sessions
