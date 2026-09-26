@@ -43,7 +43,12 @@ export const BiometricAuthModal: React.FC<BiometricAuthModalProps> = ({
         const isHodMode = activeRoleMode === 'hod' || cleanEntered === 'DYP' || cleanEntered === 'HOD';
 
         if (isHodMode) {
-          const hodEnrolled = allEnrolled.find(c => c.role === 'hod' || c.userId.toLowerCase() === 'dyp');
+          const hodEnrolled = allEnrolled.find(c => 
+            c.role === 'hod' || 
+            c.userId.toLowerCase() === (settings.hodUsername || 'dyp').toLowerCase() ||
+            c.userId.toLowerCase() === 'dyp' || 
+            c.userId.toLowerCase() === 'hod'
+          );
           if (!hodEnrolled) {
             setScanState('not-enrolled');
             setErrorMessage('HOD has not enrolled a biometric fingerprint on this system yet.');
@@ -141,7 +146,8 @@ export const BiometricAuthModal: React.FC<BiometricAuthModalProps> = ({
         onLoginSuccess({
           role: 'hod',
           id: 'hod-1',
-          name: settings.hodName || cred.userName || 'dyp',
+          name: settings.hodName || 'Prof. Prashant Kathole',
+          uniqueCode: settings.hodUsername || 'dyp',
           department: settings.departmentName,
           email: 'hod.ece@dypatil.edu'
         });

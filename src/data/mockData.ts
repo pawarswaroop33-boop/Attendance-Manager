@@ -2,8 +2,9 @@ import { ClassGroup, Student, AttendanceSession, Teacher, Classroom, TimetableSl
 
 export const INITIAL_SETTINGS: SystemSettings = {
   collegeName: 'D.Y.PATIL TECHNCIAL CAMPUS',
-  departmentName: 'Department Of Electronics and Computer Engineering',
-  hodName: 'dyp',
+  departmentName: 'Department Of Electronics And Computer Engineering',
+  hodName: 'Prof. Prashant Kathole',
+  hodUsername: 'dyp',
   hodPasscode: 'dyp123',
   defaulterThreshold: 50, // Criteria set to 50% by default
   cloudSyncStatus: 'synced',

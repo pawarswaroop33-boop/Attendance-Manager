@@ -28,6 +28,11 @@ export interface PasswordStrength {
   suggestions: string[];
 }
 
+export function sanitizeUsername(username: string): string {
+  // Disallow HTML/script tags or SQL escape characters
+  return username.replace(/[<>{}"'`\\/]/g, '').trim();
+}
+
 export function evaluatePasswordStrength(password: string): PasswordStrength {
   if (!password) {
     return {

@@ -116,10 +116,10 @@ export const Header: React.FC<HeaderProps> = ({
               type="button"
               onClick={onForceSync}
               disabled={cloudSyncing}
-              className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer border ${
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all cursor-pointer border btn-tactile ${
                 isQuotaExhausted
-                  ? 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
-                  : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100 active:scale-95'
+                  ? 'bg-gradient-to-b from-amber-50 to-amber-100/70 text-amber-900 border-amber-300 shadow-xs'
+                  : 'bg-gradient-to-b from-emerald-50 to-emerald-100/70 text-emerald-900 border-emerald-300 shadow-xs'
               }`}
               title={`Active Cloud Database: ${activeDbProvider}. Click to instantly force push/sync data to cloud.`}
             >
@@ -132,7 +132,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={onLogout}
-              className="flex items-center gap-1 text-[11px] font-bold text-slate-600 hover:text-rose-600 bg-slate-100 hover:bg-rose-50 px-2.5 py-1.5 rounded-lg border border-slate-200 hover:border-rose-200 transition-colors cursor-pointer min-h-[34px]"
+              className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700 hover:text-rose-600 bg-gradient-to-b from-white to-slate-100 hover:to-rose-50 px-3 py-1.5 rounded-xl border border-slate-200/90 hover:border-rose-300 shadow-xs transition-all cursor-pointer min-h-[34px] btn-tactile"
               title="Sign out"
             >
               <LogOut className="w-3.5 h-3.5" />
@@ -142,7 +142,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Secondary Header Row: Class, Date, and Live Stats */}
-        <div className="pb-2.5 pt-1 grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
+        <div className="pb-2.5 pt-1 grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center">
           
           {/* Class Selector Dropdown */}
           <div className="sm:col-span-4 relative">
@@ -150,7 +150,7 @@ export const Header: React.FC<HeaderProps> = ({
               id="class-selector"
               value={selectedClassId}
               onChange={(e) => onClassChange(e.target.value)}
-              className="w-full appearance-none bg-slate-100 hover:bg-slate-200/80 text-slate-900 text-xs sm:text-sm font-semibold pl-3 pr-8 py-2 rounded-xl border border-slate-200 cursor-pointer focus:outline-hidden focus:ring-2 focus:ring-slate-900 transition-all truncate"
+              className="w-full appearance-none bg-gradient-to-b from-white to-slate-50 hover:to-slate-100/80 text-slate-900 text-xs sm:text-sm font-bold pl-3.5 pr-8 py-2 rounded-xl border border-slate-300/90 cursor-pointer focus:outline-hidden focus:ring-2 focus:ring-slate-900 shadow-[0_1px_3px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,1)] transition-all truncate"
             >
               {classes.map(cls => (
                 <option key={cls.id} value={cls.id}>
@@ -158,30 +158,30 @@ export const Header: React.FC<HeaderProps> = ({
                 </option>
               ))}
             </select>
-            <ChevronDown className="w-3.5 h-3.5 text-slate-500 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <ChevronDown className="w-4 h-4 text-slate-500 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>
 
           {/* Date Picker & Today Button */}
-          <div className="sm:col-span-4 flex items-center gap-1.5 bg-slate-100 border border-slate-200 rounded-xl px-2.5 py-1 text-xs text-slate-700 min-h-[38px]">
-            <Calendar className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+          <div className="sm:col-span-4 flex items-center gap-2 bg-gradient-to-b from-white to-slate-50 border border-slate-300/90 rounded-xl px-3 py-1 text-xs text-slate-700 min-h-[38px] shadow-[0_1px_3px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,1)] focus-within:ring-2 focus-within:ring-slate-900 transition-all">
+            <Calendar className="w-3.5 h-3.5 text-slate-600 shrink-0" />
             <input
               id="attendance-date"
               type="date"
               value={selectedDate}
               onChange={(e) => onDateChange(e.target.value)}
-              className="bg-transparent text-xs font-semibold text-slate-800 focus:outline-hidden cursor-pointer flex-1 min-w-0"
+              className="bg-transparent text-xs font-bold text-slate-900 focus:outline-hidden cursor-pointer flex-1 min-w-0"
             />
             <button
               type="button"
               onClick={handleSetToday}
-              className="text-[10px] font-bold text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-50 px-2 py-1 rounded-md border border-slate-200 transition-colors cursor-pointer shrink-0"
+              className="text-[10px] font-black text-slate-800 hover:text-slate-950 bg-gradient-to-b from-white to-slate-100 hover:to-slate-200 px-2.5 py-1 rounded-lg border border-slate-300 shadow-xs active:translate-y-0.5 active:shadow-inner transition-all cursor-pointer shrink-0"
             >
               Today
             </button>
           </div>
 
           {/* Live Attendance Stats */}
-          <div className="sm:col-span-4 flex items-center justify-between sm:justify-end gap-2 text-xs px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 min-h-[38px]">
+          <div className="sm:col-span-4 flex items-center justify-between sm:justify-end gap-2.5 text-xs px-3.5 py-1.5 rounded-xl bg-gradient-to-b from-white to-slate-50 border border-slate-200/90 shadow-[0_1px_2px_rgba(0,0,0,0.04),inset_0_1px_0_rgba(255,255,255,1)] min-h-[38px]">
             <div className="flex items-center gap-1.5 text-slate-600 font-medium">
               <span className={`w-2 h-2 rounded-full ${savedIndicator ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`}></span>
               <span className="text-[11px] font-semibold">{savedIndicator ? 'Saved' : 'Ready'}</span>
@@ -190,7 +190,7 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="text-emerald-700">{totalPresent} P</span>
               <span className="text-slate-300">&bull;</span>
               <span className="text-rose-700">{totalAbsent} A</span>
-              <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded-md bg-slate-900 text-white shrink-0">
+              <span className="text-[10px] font-black px-2 py-0.5 rounded-lg bg-slate-900 text-white shadow-xs shrink-0">
                 {attendancePercent}%
               </span>
             </div>
@@ -199,44 +199,50 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Navigation Tabs Bar - Clean swipeable tabs */}
-        <nav className="flex items-center gap-1 sm:gap-1.5 border-t border-slate-100 pt-1.5 pb-2 overflow-x-auto no-scrollbar w-full max-w-full scroll-smooth">
+        <nav className="flex items-center gap-1.5 sm:gap-2 border-t border-slate-100 pt-1.5 pb-2 overflow-x-auto no-scrollbar w-full max-w-full scroll-smooth">
           
-          <button
-            id="tab-dashboard"
-            type="button"
-            onClick={() => onTabChange('dashboard')}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap cursor-pointer shrink-0 min-h-[38px] ${
-              currentTab === 'dashboard'
-                ? 'bg-slate-900 text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <LayoutDashboard className="w-3.5 h-3.5" />
-            <span>Attendance</span>
-          </button>
+          {/* HOD Center Tab (Only for HOD - Main Hub) */}
+          {currentUser.role === 'hod' && (
+            <button
+              id="tab-hod"
+              type="button"
+              onClick={() => onTabChange('hod')}
+              className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-black rounded-xl transition-all whitespace-nowrap cursor-pointer shrink-0 min-h-[38px] ${
+                currentTab === 'hod'
+                  ? 'bg-gradient-to-b from-amber-400 to-amber-500 text-slate-950 border border-amber-600/40 shadow-[0_2px_8px_rgba(245,158,11,0.4),inset_0_1px_0_rgba(255,255,255,0.4)]'
+                  : 'text-amber-950 bg-gradient-to-b from-amber-50 to-amber-100/70 hover:to-amber-100 border border-amber-300/80 shadow-xs hover:shadow-sm active:translate-y-0.5'
+              }`}
+            >
+              <ShieldCheck className="w-4 h-4 text-amber-700" />
+              <span>HOD Center</span>
+            </button>
+          )}
 
-          <button
-            id="tab-timetable"
-            type="button"
-            onClick={() => onTabChange('timetable')}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap cursor-pointer shrink-0 min-h-[38px] ${
-              currentTab === 'timetable'
-                ? 'bg-slate-900 text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <Clock className="w-3.5 h-3.5 text-sky-500" />
-            <span>Timetable</span>
-          </button>
+          {/* Teacher Attendance Tab (ONLY for Faculty/Teachers - HOD does NOT take attendance) */}
+          {currentUser.role === 'teacher' && (
+            <button
+              id="tab-dashboard"
+              type="button"
+              onClick={() => onTabChange('dashboard')}
+              className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap cursor-pointer shrink-0 min-h-[38px] ${
+                currentTab === 'dashboard'
+                  ? 'bg-slate-900 text-white shadow-[0_2px_6px_rgba(15,23,42,0.35),inset_0_1px_0_rgba(255,255,255,0.15)] border border-slate-950'
+                  : 'text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200/90 shadow-xs hover:shadow-sm active:translate-y-0.5'
+              }`}
+            >
+              <LayoutDashboard className="w-3.5 h-3.5" />
+              <span>Take Attendance</span>
+            </button>
+          )}
 
           <button
             id="tab-defaulters"
             type="button"
             onClick={() => onTabChange('defaulters')}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap cursor-pointer shrink-0 min-h-[38px] ${
+            className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap cursor-pointer shrink-0 min-h-[38px] ${
               currentTab === 'defaulters'
-                ? 'bg-slate-900 text-white shadow-xs'
-                : 'text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200'
+                ? 'bg-slate-900 text-white shadow-[0_2px_6px_rgba(15,23,42,0.35),inset_0_1px_0_rgba(255,255,255,0.15)] border border-slate-950'
+                : 'text-slate-700 bg-gradient-to-b from-white to-slate-50 hover:to-slate-100 border border-slate-200/90 shadow-xs hover:shadow-sm active:translate-y-0.5'
             }`}
             title="Attendance Log & Defaulters Register"
           >
@@ -252,27 +258,27 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           <button
-            id="tab-analytics"
+            id="tab-timetable"
             type="button"
-            onClick={() => onTabChange('analytics')}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap cursor-pointer shrink-0 min-h-[38px] ${
-              currentTab === 'analytics'
-                ? 'bg-slate-900 text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            onClick={() => onTabChange('timetable')}
+            className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap cursor-pointer shrink-0 min-h-[38px] ${
+              currentTab === 'timetable'
+                ? 'bg-slate-900 text-white shadow-[0_2px_6px_rgba(15,23,42,0.35),inset_0_1px_0_rgba(255,255,255,0.15)] border border-slate-950'
+                : 'text-slate-700 bg-gradient-to-b from-white to-slate-50 hover:to-slate-100 border border-slate-200/90 shadow-xs hover:shadow-sm active:translate-y-0.5'
             }`}
           >
-            <BarChart3 className="w-3.5 h-3.5" />
-            <span>Analytics</span>
+            <Clock className="w-3.5 h-3.5 text-sky-500" />
+            <span>Timetable</span>
           </button>
 
           <button
             id="tab-students"
             type="button"
             onClick={() => onTabChange('students')}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap cursor-pointer shrink-0 min-h-[38px] ${
+            className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap cursor-pointer shrink-0 min-h-[38px] ${
               currentTab === 'students'
-                ? 'bg-slate-900 text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                ? 'bg-slate-900 text-white shadow-[0_2px_6px_rgba(15,23,42,0.35),inset_0_1px_0_rgba(255,255,255,0.15)] border border-slate-950'
+                : 'text-slate-700 bg-gradient-to-b from-white to-slate-50 hover:to-slate-100 border border-slate-200/90 shadow-xs hover:shadow-sm active:translate-y-0.5'
             }`}
           >
             <Users className="w-3.5 h-3.5" />
@@ -284,28 +290,26 @@ export const Header: React.FC<HeaderProps> = ({
             </span>
           </button>
 
-          {currentUser.role === 'hod' && (
-            <button
-              id="tab-hod"
-              type="button"
-              onClick={() => onTabChange('hod')}
-              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap cursor-pointer shrink-0 min-h-[38px] ${
-                currentTab === 'hod'
-                  ? 'bg-amber-500 text-slate-950 shadow-xs'
-                  : 'text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-300'
-              }`}
-            >
-              <ShieldCheck className="w-3.5 h-3.5 text-amber-600" />
-              <span>HOD Center</span>
-            </button>
-          )}
+          <button
+            id="tab-analytics"
+            type="button"
+            onClick={() => onTabChange('analytics')}
+            className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap cursor-pointer shrink-0 min-h-[38px] ${
+              currentTab === 'analytics'
+                ? 'bg-slate-900 text-white shadow-[0_2px_6px_rgba(15,23,42,0.35),inset_0_1px_0_rgba(255,255,255,0.15)] border border-slate-950'
+                : 'text-slate-700 bg-gradient-to-b from-white to-slate-50 hover:to-slate-100 border border-slate-200/90 shadow-xs hover:shadow-sm active:translate-y-0.5'
+            }`}
+          >
+            <BarChart3 className="w-3.5 h-3.5" />
+            <span>Analytics</span>
+          </button>
 
           {currentUser.role === 'hod' && (
             <button
               id="open-scanner-button"
               type="button"
               onClick={onOpenImportModal}
-              className="flex items-center gap-1 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-3 py-2 rounded-xl transition-colors cursor-pointer shrink-0 min-h-[38px]"
+              className="flex items-center gap-1.5 text-xs font-bold text-emerald-900 bg-gradient-to-b from-emerald-50 to-emerald-100 hover:to-emerald-200/80 border border-emerald-300/90 px-3.5 py-2 rounded-xl shadow-xs hover:shadow-sm active:translate-y-0.5 transition-all cursor-pointer shrink-0 min-h-[38px] btn-tactile"
               title="Import Excel or PDF student roster"
             >
               <Sparkles className="w-3.5 h-3.5 text-emerald-600" />

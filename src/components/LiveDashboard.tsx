@@ -781,32 +781,30 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
         </div>
       )}
 
-      {/* Attendance Mode Switcher: Styled identically to Teacher/HOD 3D sliding button */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <h3 className="text-xs sm:text-sm font-bold text-slate-900">Attendance Taking Method</h3>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
-              {stats.present} Present &bull; {stats.absent} Absent &bull; {stats.unmarked} Unmarked
-            </span>
-          </div>
+      {/* Attendance Mode Switcher */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-white px-3.5 py-2.5 sm:px-4 sm:py-3 rounded-2xl border border-slate-200 shadow-xs">
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+          <span className="text-xs font-bold text-slate-800">Mode:</span>
+          <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+            {stats.present} Present &bull; {stats.absent} Absent &bull; {stats.unmarked} Blank
+          </span>
         </div>
 
         {/* Tactile 3D Sliding Switcher */}
-        <div className="relative flex items-center p-1.5 bg-slate-200/70 rounded-full border border-slate-300/80 shadow-[inset_0_2px_4px_rgba(0,0,0,0.06),0_1px_2px_rgba(255,255,255,0.85)] text-xs font-semibold select-none w-full sm:w-80 shrink-0">
+        <div className="relative flex items-center p-1 bg-slate-200/70 rounded-full border border-slate-300/80 shadow-[inset_0_2px_4px_rgba(0,0,0,0.06),0_1px_2px_rgba(255,255,255,0.85)] text-xs font-semibold select-none w-full sm:w-72 shrink-0">
           <div
-            className={`absolute top-1.5 bottom-1.5 w-[calc(50%-6px)] rounded-full bg-gradient-to-b from-white via-white to-slate-50 border-t border-white border-b-2 border-b-slate-300 border-x border-slate-200/80 shadow-[0_4px_10px_-1px_rgba(15,23,42,0.16),0_2px_4px_-1px_rgba(15,23,42,0.08),inset_0_1px_0_rgba(255,255,255,1)] transition-all duration-300 ease-[cubic-bezier(0.2,0,0,1)] pointer-events-none ${
+            className={`absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-full bg-gradient-to-b from-white via-white to-slate-50 border-t border-white border-b-2 border-b-slate-300 border-x border-slate-200/80 shadow-[0_4px_10px_-1px_rgba(15,23,42,0.16),0_2px_4px_-1px_rgba(15,23,42,0.08),inset_0_1px_0_rgba(255,255,255,1)] transition-all duration-300 ease-[cubic-bezier(0.2,0,0,1)] pointer-events-none ${
               attendanceMode === 'normal'
-                ? 'left-1.5 translate-x-0'
-                : 'left-1.5 translate-x-[calc(100%+6px)]'
+                ? 'left-1 translate-x-0'
+                : 'left-1 translate-x-[calc(100%+4px)]'
             }`}
           />
 
           <button
             type="button"
             onClick={() => setAttendanceMode('normal')}
-            className={`relative z-10 flex-1 py-2 px-3 rounded-full text-center transition-all duration-200 cursor-pointer active:scale-95 flex items-center justify-center gap-1.5 ${
+            className={`relative z-10 flex-1 py-1.5 px-3 rounded-full text-center transition-all duration-200 cursor-pointer active:scale-95 flex items-center justify-center gap-1.5 ${
               attendanceMode === 'normal'
                 ? 'text-slate-900 font-bold'
                 : 'text-slate-500 hover:text-slate-800'
@@ -819,7 +817,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
           <button
             type="button"
             onClick={handleSwitchToManualRoll}
-            className={`relative z-10 flex-1 py-2 px-3 rounded-full text-center transition-all duration-200 cursor-pointer active:scale-95 flex items-center justify-center gap-1.5 ${
+            className={`relative z-10 flex-1 py-1.5 px-3 rounded-full text-center transition-all duration-200 cursor-pointer active:scale-95 flex items-center justify-center gap-1.5 ${
               attendanceMode === 'manual-roll'
                 ? 'text-slate-900 font-bold'
                 : 'text-slate-500 hover:text-slate-800'
@@ -927,7 +925,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
         </div>
 
         {/* Quick Batch Actions & Permanent Save Action */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-slate-100">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 pt-2 border-t border-slate-100">
           <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 w-full sm:w-auto">
             <span className="text-xs font-bold text-slate-500">Quick Actions:</span>
             
@@ -936,10 +934,10 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                 id="action-mark-all-present"
                 type="button"
                 onClick={handleMarkAllPresentWithFeedback}
-                className="flex items-center justify-center gap-1 sm:gap-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold px-2 py-2 rounded-xl transition-colors cursor-pointer min-h-[40px] text-center"
+                className="flex items-center justify-center gap-1 sm:gap-1.5 bg-gradient-to-b from-emerald-50 to-emerald-100/90 hover:to-emerald-100 text-emerald-900 border border-emerald-300/90 text-xs font-black px-3 py-2 rounded-xl shadow-xs hover:shadow-sm active:translate-y-0.5 transition-all cursor-pointer min-h-[40px] text-center btn-tactile"
                 title="Mark all students as Present"
               >
-                <CheckSquare className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <CheckSquare className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
                 <span className="truncate">All Present</span>
               </button>
 
@@ -947,10 +945,10 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                 id="action-mark-all-absent"
                 type="button"
                 onClick={() => onBatchUpdate('absent')}
-                className="flex items-center justify-center gap-1 sm:gap-1.5 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 text-xs font-bold px-2 py-2 rounded-xl transition-colors cursor-pointer min-h-[40px] text-center"
+                className="flex items-center justify-center gap-1 sm:gap-1.5 bg-gradient-to-b from-rose-50 to-rose-100/90 hover:to-rose-100 text-rose-900 border border-rose-300/90 text-xs font-black px-3 py-2 rounded-xl shadow-xs hover:shadow-sm active:translate-y-0.5 transition-all cursor-pointer min-h-[40px] text-center btn-tactile"
                 title="Mark all students as Absent"
               >
-                <Square className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                <Square className="w-3.5 h-3.5 text-rose-700 shrink-0" />
                 <span className="truncate">All Absent</span>
               </button>
 
@@ -958,7 +956,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                 id="action-clear-all-blank"
                 type="button"
                 onClick={handleClearAll}
-                className="flex items-center justify-center gap-1 sm:gap-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold px-2 py-2 rounded-xl transition-colors cursor-pointer min-h-[40px] text-center"
+                className="flex items-center justify-center gap-1 sm:gap-1.5 bg-gradient-to-b from-white to-slate-100 hover:to-slate-200 text-slate-800 border border-slate-300 text-xs font-bold px-3 py-2 rounded-xl shadow-xs hover:shadow-sm active:translate-y-0.5 transition-all cursor-pointer min-h-[40px] text-center btn-tactile"
                 title="Clear all selections and reset roster"
               >
                 <X className="w-3.5 h-3.5 text-slate-500 shrink-0" />
@@ -967,30 +965,30 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
             </div>
           </div>
 
-          {/* Save Permanently Button in Action Bar */}
+          {/* Save Permanently Button & Attendance Log side-by-side in one line */}
           {onSaveAttendancePermanently && (
-            <div className="flex flex-wrap items-center gap-2 pt-2 sm:pt-0">
+            <div className="flex items-center flex-nowrap gap-2 pt-2 lg:pt-0 w-full sm:w-auto shrink-0">
               <button
                 id="btn-save-attendance-permanently"
                 type="button"
                 onClick={onSaveAttendancePermanently}
-                className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition-all shadow-xs cursor-pointer"
+                className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-gradient-to-b from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 active:scale-95 active:translate-y-0.5 text-white text-xs font-black px-3.5 py-2 rounded-xl transition-all shadow-[0_2px_8px_rgba(16,185,129,0.35),inset_0_1px_0_rgba(255,255,255,0.3)] border border-emerald-400/40 cursor-pointer whitespace-nowrap min-h-[40px]"
                 title="Save attendance permanently with Date, Day, Present and Absent list"
               >
-                <Save className="w-3.5 h-3.5" />
-                <span>Save Attendance Permanently</span>
+                <Save className="w-3.5 h-3.5 shrink-0" />
+                <span>Save Attendance</span>
               </button>
 
               {onNavigateToRegister && (
                 <button
                   type="button"
                   onClick={onNavigateToRegister}
-                  className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold px-3 py-2 rounded-xl transition-all cursor-pointer"
+                  className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-gradient-to-b from-white to-slate-100 hover:to-slate-200 text-slate-800 text-xs font-bold px-3.5 py-2 rounded-xl border border-slate-200/90 shadow-xs active:translate-y-0.5 transition-all cursor-pointer btn-tactile whitespace-nowrap min-h-[40px]"
                   title="View taken records and defaulters list"
                 >
-                  <CalendarCheck className="w-3.5 h-3.5 text-slate-600" />
+                  <CalendarCheck className="w-3.5 h-3.5 text-slate-600 shrink-0" />
                   <span>Attendance Log</span>
-                  <ArrowRight className="w-3 h-3 text-slate-400" />
+                  <ArrowRight className="w-3 h-3 text-slate-400 shrink-0" />
                 </button>
               )}
             </div>
@@ -1002,15 +1000,16 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
         
         {/* Table/List Header */}
-        <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2">
-          <div>
-            <h3 className="text-xs sm:text-sm font-bold text-slate-900">Student Roll Call</h3>
-            <p className="text-[11px] text-slate-500">
-              Tap row or tap Present / Absent / Late to record attendance
-            </p>
+        <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-slate-400" />
+            <span className="font-bold text-slate-800 tracking-tight">Student Roster</span>
+            <span className="text-[11px] font-semibold text-slate-500 bg-white px-2 py-0.5 rounded-md border border-slate-200">
+              {filteredStudents.length} of {classStudents.length}
+            </span>
           </div>
-          <span className="text-xs font-semibold text-slate-600 bg-white px-2 py-1 rounded-lg border border-slate-200">
-            {filteredStudents.length} of {classStudents.length} students
+          <span className="text-[11px] font-mono font-bold text-slate-600 bg-white px-2 py-0.5 rounded-md border border-slate-200">
+            {stats.present} Present &bull; {stats.absent} Absent {stats.late > 0 ? `• ${stats.late} Late` : ''}
           </span>
         </div>
 
@@ -1349,7 +1348,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
               <button
                 type="button"
                 onClick={handleClearAll}
-                className="w-full sm:w-auto flex items-center justify-center gap-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-3.5 py-2.5 rounded-xl transition-all cursor-pointer"
+                className="w-full sm:w-auto flex items-center justify-center gap-1.5 bg-gradient-to-b from-white to-slate-100 hover:to-slate-200 text-slate-800 text-xs font-bold px-4 py-2.5 rounded-xl border border-slate-300 shadow-xs active:translate-y-0.5 transition-all cursor-pointer btn-tactile"
                 title="Reset all back to unmarked"
               >
                 <X className="w-3.5 h-3.5 text-slate-500" />
@@ -1360,7 +1359,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                 <button
                   type="button"
                   onClick={onSaveAttendancePermanently}
-                  className="flex-1 w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs sm:text-sm py-2.5 px-4 rounded-xl shadow-xs transition-all cursor-pointer"
+                  className="flex-1 w-full flex items-center justify-center gap-2 bg-gradient-to-b from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 active:scale-95 active:translate-y-0.5 text-white font-black text-xs sm:text-sm py-2.5 px-4 rounded-xl shadow-[0_3px_12px_rgba(16,185,129,0.38),inset_0_1px_0_rgba(255,255,255,0.3)] border border-emerald-400/40 transition-all cursor-pointer"
                 >
                   <Save className="w-4 h-4" />
                   <span>Save Attendance Permanently</span>
@@ -1370,7 +1369,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
               <button
                 type="button"
                 onClick={onOpenWhatsApp}
-                className="w-full sm:w-auto flex items-center justify-center gap-1.5 bg-[#25D366] hover:bg-[#1faa4f] active:scale-95 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-xs transition-all cursor-pointer"
+                className="w-full sm:w-auto flex items-center justify-center gap-1.5 bg-gradient-to-b from-[#25D366] to-[#1eb857] hover:from-[#2bf074] hover:to-[#22cc61] active:scale-95 active:translate-y-0.5 text-white text-xs font-black px-4 py-2.5 rounded-xl shadow-[0_3px_10px_rgba(37,211,102,0.35),inset_0_1px_0_rgba(255,255,255,0.3)] border border-emerald-300/40 transition-all cursor-pointer"
               >
                 <Share2 className="w-3.5 h-3.5" />
                 <span>Share WhatsApp</span>

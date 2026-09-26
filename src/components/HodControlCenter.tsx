@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   ShieldCheck, 
   Settings, 
@@ -8,43 +8,60 @@ import {
   Plus, 
   Trash2, 
   Edit3, 
-  Key, 
   Copy, 
   Check, 
   RotateCcw, 
   Save, 
-  BookOpen, 
   MapPin, 
   AlertCircle,
   AlertTriangle,
   Sparkles,
   School,
-  Building2,
   Clock,
   Search,
   UserPlus,
   Phone,
   GraduationCap,
-  Database,
-  Server,
   Cloud,
-  Download,
-  ArrowRightLeft,
-  CheckCircle2, 
-  Code, 
-  ExternalLink,
   Lock,
   Eye,
   EyeOff,
-  KeyRound,
   Fingerprint,
-  Cpu
+  Menu,
+  X,
+  ClipboardList,
+  BarChart3,
+  CheckCircle2,
+  ChevronRight,
+  Shield,
+  Layers,
+  Sparkle
 } from 'lucide-react';
-import { Teacher, Classroom, TimetableSlot, ClassGroup, SystemSettings, DayOfWeek, Student, AttendanceSession } from '../types';
+import { 
+  Teacher, 
+  Classroom, 
+  TimetableSlot, 
+  ClassGroup, 
+  SystemSettings, 
+  DayOfWeek, 
+  Student, 
+  AttendanceSession,
+  AuthUser 
+} from '../types';
 import { dbService } from '../services/databaseService';
-import { DatabaseProviderType } from '../services/dbInterface';
-import { sha256Hex, evaluatePasswordStrength } from '../utils/crypto';
+import { sha256Hex, evaluatePasswordStrength, sanitizeUsername } from '../utils/crypto';
 import { biometricService } from '../services/biometricService';
+import { AttendanceCalendar } from './AttendanceCalendar';
+import { formatDateShort } from '../utils/dateUtils';
+
+export type HodSidebarSection = 
+  | 'students' 
+  | 'timetable' 
+  | 'faculty' 
+  | 'classrooms' 
+  | 'attendance_log' 
+  | 'analytics' 
+  | 'settings';
 
 interface HodControlCenterProps {
   settings: SystemSettings;
@@ -74,6 +91,8 @@ interface HodControlCenterProps {
   onForceSyncCloud?: () => void;
   isCloudSyncing?: boolean;
   sessions?: AttendanceSession[];
+  onClearDateAttendance?: (dateStr: string) => void;
+  onClearSession?: (sessionId: string) => void;
 }
 
 export const HodControlCenter: React.FC<HodControlCenterProps> = ({
@@ -103,24 +122,36 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
   onOpenBiometrics,
   onForceSyncCloud,
   isCloudSyncing,
-  sessions = []
+  sessions = [],
+  onClearDateAttendance,
+  onClearSession
 }) => {
-  const [activeTab, setActiveTab] = useState<'students' | 'teachers' | 'timetable' | 'classrooms' | 'classes' | 'settings' | 'database'>('students');
-  const [copiedSchema, setCopiedSchema] = useState(false);
-  const [activeProvider, setActiveProvider] = useState<DatabaseProviderType>(dbService.currentProvider);
-  const [isPushingToSupabase, setIsPushingToSupabase] = useState(false);
-  const [supabaseSyncMsg, setSupabaseSyncMsg] = useState<{ text: string; type: 'success' | 'warning' | 'error' } | null>(null);
+  // Sidebar Navigation State
+  const [activeSection, setActiveSection] = useState<HodSidebarSection>('students');
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isMobileSidebarClosing, setIsMobileSidebarClosing] = useState(false);
+
+  // Animated close handler for mobile drawer
+  const handleCloseMobileSidebar = () => {
+    if (isMobileSidebarClosing) return;
+    setIsMobileSidebarClosing(true);
+    setTimeout(() => {
+      setIsMobileSidebarOpen(false);
+      setIsMobileSidebarClosing(false);
+    }, 240);
+  };
 
   // Synchronized Settings State
   const [collegeName, setCollegeName] = useState(settings.collegeName);
   const [deptName, setDeptName] = useState(settings.departmentName);
-  const [hodName, setHodName] = useState(settings.hodName);
+  const [hodName, setHodName] = useState(settings.hodName || 'Prof. Prashant Kathole');
   const [hodPasscode, setHodPasscode] = useState(settings.hodPasscode);
   const [settingsSavedMsg, setSettingsSavedMsg] = useState(false);
 
   // HOD Security & Credential Management States
+  const [credentialTarget, setCredentialTarget] = useState<'both' | 'username_only' | 'password_only'>('both');
   const [currentPasswordInput, setCurrentPasswordInput] = useState('');
-  const [newUsernameInput, setNewUsernameInput] = useState(settings.hodName || 'dyp');
+  const [newUsernameInput, setNewUsernameInput] = useState(settings.hodUsername || 'dyp');
   const [newPasswordInput, setNewPasswordInput] = useState('');
   const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
@@ -130,102 +161,12 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
   const [credentialSuccess, setCredentialSuccess] = useState('');
   const [isUpdatingCredentials, setIsUpdatingCredentials] = useState(false);
 
-  // Biometric state refresh trigger
-  const [biometricTick, setBiometricTick] = useState(0);
-  const isHodBiometricEnrolled = biometricService.isUserEnrolled(settings.hodName || 'dyp') || biometricService.isUserEnrolled('dyp') || biometricService.isUserEnrolled('hod');
-  const biometricHardware = biometricService.getBiometricHardwareName();
-  const enrolledBiometricsCount = biometricService.getRegisteredCredentials().length;
+  // Live Password Strength Calculation
+  const passwordStrength = useMemo(() => {
+    return evaluatePasswordStrength(newPasswordInput);
+  }, [newPasswordInput]);
 
-  // Sync whenever settings prop updates (e.g. on reset)
-  useEffect(() => {
-    setCollegeName(settings.collegeName);
-    setDeptName(settings.departmentName);
-    setHodName(settings.hodName);
-    setHodPasscode(settings.hodPasscode);
-    setNewUsernameInput(settings.hodName || 'dyp');
-  }, [settings]);
-
-  // Handle HOD Credential Update with Verification & SHA-256 Encryption
-  const handleUpdateHodCredentials = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setCredentialError('');
-    setCredentialSuccess('');
-
-    const cleanCurrent = currentPasswordInput.trim();
-    const cleanUser = newUsernameInput.trim();
-    const cleanNewPass = newPasswordInput.trim();
-    const cleanConfirm = confirmPasswordInput.trim();
-
-    // 1. Current Password Verification
-    if (!cleanCurrent) {
-      setCredentialError('Please enter your current HOD password to authorize changes.');
-      return;
-    }
-    const currentPass = settings.hodPasscode || 'dyp123';
-    if (cleanCurrent !== currentPass && cleanCurrent !== 'dyp123') {
-      setCredentialError('Incorrect current password. Identity verification failed.');
-      return;
-    }
-
-    // 2. Validate new username
-    if (!cleanUser) {
-      setCredentialError('HOD username cannot be empty.');
-      return;
-    }
-    if (cleanUser.length < 3) {
-      setCredentialError('HOD username must be at least 3 characters.');
-      return;
-    }
-
-    // 3. Validate new password
-    if (!cleanNewPass) {
-      setCredentialError('Please enter a new password.');
-      return;
-    }
-    if (cleanNewPass.length < 6) {
-      setCredentialError('New password must be at least 6 characters long.');
-      return;
-    }
-    if (cleanNewPass !== cleanConfirm) {
-      setCredentialError('New password and confirmation password do not match.');
-      return;
-    }
-
-    setIsUpdatingCredentials(true);
-    try {
-      // Cryptographic SHA-256 hash for end-to-end credential integrity
-      const hash = await sha256Hex(cleanNewPass);
-
-      const updatedSettings: SystemSettings = {
-        ...settings,
-        hodName: cleanUser,
-        hodPasscode: cleanNewPass,
-        hodPasswordHash: hash
-      };
-
-      onUpdateSettings(updatedSettings);
-      setHodName(cleanUser);
-      setHodPasscode(cleanNewPass);
-      setCurrentPasswordInput('');
-      setNewPasswordInput('');
-      setConfirmPasswordInput('');
-      setCredentialSuccess(`HOD login credentials successfully updated and encrypted! Username: "${cleanUser}".`);
-
-      setTimeout(() => setCredentialSuccess(''), 5000);
-    } catch (err) {
-      setCredentialError('Failed to encrypt and update credentials. Please try again.');
-    } finally {
-      setIsUpdatingCredentials(false);
-    }
-  };
-
-  // Modal states for in-app confirmations (NO window.confirm)
-  const [showResetCampusModal, setShowResetCampusModal] = useState(false);
-  const [showResetSettingsModal, setShowResetSettingsModal] = useState(false);
-  const [showDeleteAllStudentsModal, setShowDeleteAllStudentsModal] = useState(false);
-  const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
-
-  // Student Tab state
+  // Student Section State
   const [selectedStudentClassId, setSelectedStudentClassId] = useState<string>('all');
   const [studentSearch, setStudentSearch] = useState('');
   const [showAddStudentModal, setShowAddStudentModal] = useState(false);
@@ -240,7 +181,7 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
   const [newStudentEmail, setNewStudentEmail] = useState('');
   const [newStudentClassId, setNewStudentClassId] = useState(classes[0]?.id || '');
 
-  // Teacher Modal / Form State
+  // Teacher Section State
   const [showAddTeacherModal, setShowAddTeacherModal] = useState(false);
   const [newTeacherName, setNewTeacherName] = useState('');
   const [newTeacherCode, setNewTeacherCode] = useState(`TEACH${100 + teachers.length + 1}`);
@@ -251,6 +192,7 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
   const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null);
 
   // Timetable Slot Form State
+  const [selectedTimetableDay, setSelectedTimetableDay] = useState<'all' | DayOfWeek>('all');
   const [showAddSlotModal, setShowAddSlotModal] = useState(false);
   const [newSlotDay, setNewSlotDay] = useState<DayOfWeek>('Monday');
   const [newSlotStartTime, setNewSlotStartTime] = useState('08:00 AM');
@@ -267,6 +209,123 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
   const [newRoomCapacity, setNewRoomCapacity] = useState(70);
   const [newRoomType, setNewRoomType] = useState<'classroom' | 'lab' | 'seminar_hall'>('classroom');
 
+  // Attendance Log Calendar State
+  const [calendarSelectedDate, setCalendarSelectedDate] = useState<string | null>(null);
+
+  // Confirmation Modals
+  const [showResetCampusModal, setShowResetCampusModal] = useState(false);
+  const [showResetSettingsModal, setShowResetSettingsModal] = useState(false);
+  const [showDeleteAllStudentsModal, setShowDeleteAllStudentsModal] = useState(false);
+  const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
+
+  // Biometric status
+  const isHodBiometricEnrolled = biometricService.isUserEnrolled(settings.hodUsername || 'dyp') || biometricService.isUserEnrolled('dyp') || biometricService.isUserEnrolled('hod');
+
+  // Synchronize settings
+  useEffect(() => {
+    setCollegeName(settings.collegeName);
+    setDeptName(settings.departmentName);
+    setHodName(settings.hodName || 'Prof. Prashant Kathole');
+    setHodPasscode(settings.hodPasscode);
+    setNewUsernameInput(settings.hodUsername || 'dyp');
+  }, [settings]);
+
+  // Handle HOD Credential Update with Enterprise-Grade Security
+  const handleUpdateHodCredentials = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCredentialError('');
+    setCredentialSuccess('');
+
+    const cleanCurrent = currentPasswordInput.trim();
+    const cleanUser = sanitizeUsername(newUsernameInput);
+    const cleanNewPass = newPasswordInput.trim();
+    const cleanConfirm = confirmPasswordInput.trim();
+
+    // 1. Mandatory Identity Verification with Current Password
+    if (!cleanCurrent) {
+      setCredentialError('Security Requirement: Please enter your current HOD password to authorize changes.');
+      return;
+    }
+    const currentPass = settings.hodPasscode || 'dyp123';
+    const currentPassHash = await sha256Hex(cleanCurrent);
+    const isValidCurrent = (
+      cleanCurrent === currentPass ||
+      cleanCurrent === 'dyp123' ||
+      (settings.hodPasswordHash && currentPassHash === settings.hodPasswordHash)
+    );
+
+    if (!isValidCurrent) {
+      setCredentialError('Security Warning: Incorrect current password. Credential modification was blocked.');
+      return;
+    }
+
+    // 2. Validate Username if updating username or both
+    const isUpdatingUsername = credentialTarget === 'both' || credentialTarget === 'username_only';
+    const isUpdatingPassword = credentialTarget === 'both' || credentialTarget === 'password_only';
+
+    if (isUpdatingUsername) {
+      if (!cleanUser || cleanUser.length < 3) {
+        setCredentialError('HOD username must be at least 3 characters long and contain valid characters.');
+        return;
+      }
+    }
+
+    // 3. Validate Password if updating password or both
+    if (isUpdatingPassword) {
+      if (!cleanNewPass || cleanNewPass.length < 6) {
+        setCredentialError('New password must be at least 6 characters long for cryptographic compliance.');
+        return;
+      }
+      if (cleanNewPass !== cleanConfirm) {
+        setCredentialError('New password and confirmation do not match. Please verify your typing.');
+        return;
+      }
+    }
+
+    setIsUpdatingCredentials(true);
+    try {
+      const updatedSettings: SystemSettings = { ...settings };
+      let updatedUsername = settings.hodUsername || 'dyp';
+      let updatedPassword = settings.hodPasscode || 'dyp123';
+
+      if (isUpdatingUsername) {
+        updatedSettings.hodUsername = cleanUser;
+        updatedUsername = cleanUser;
+        // Keep hodName (e.g. Prof. Prashant Kathole) intact!
+      }
+
+      if (isUpdatingPassword) {
+        const hash = await sha256Hex(cleanNewPass);
+        updatedSettings.hodPasscode = cleanNewPass;
+        updatedSettings.hodPasswordHash = hash;
+        updatedPassword = cleanNewPass;
+      }
+
+      onUpdateSettings(updatedSettings);
+      setHodPasscode(updatedPassword);
+      setNewUsernameInput(updatedUsername);
+      
+      // Clear sensitive memory buffers immediately
+      setCurrentPasswordInput('');
+      setNewPasswordInput('');
+      setConfirmPasswordInput('');
+
+      const updateSummary = 
+        credentialTarget === 'both'
+          ? `HOD Username & Password successfully updated! New login username: "${cleanUser}".`
+          : credentialTarget === 'username_only'
+            ? `HOD Login Username successfully updated to: "${cleanUser}". (HOD Name "${settings.hodName || 'Prof. Prashant Kathole'}" preserved).`
+            : `HOD Password successfully updated with SHA-256 cryptographic integrity hash!`;
+
+      setCredentialSuccess(updateSummary);
+      setTimeout(() => setCredentialSuccess(''), 6000);
+    } catch (err) {
+      setCredentialError('Cryptographic operation failed. Please try again.');
+    } finally {
+      setIsUpdatingCredentials(false);
+    }
+  };
+
   // Handle Save Settings
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
@@ -274,14 +333,14 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
       ...settings,
       collegeName,
       departmentName: deptName,
-      hodName,
-      hodPasscode
+      hodName: hodName.trim() || 'Prof. Prashant Kathole',
+      hodPasscode: settings.hodPasscode
     });
     setSettingsSavedMsg(true);
     setTimeout(() => setSettingsSavedMsg(false), 3000);
   };
 
-  // Handle Add Teacher
+  // Handle Save Teacher
   const handleSaveNewTeacher = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTeacherName.trim() || !newTeacherCode.trim()) return;
@@ -310,7 +369,7 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
     setNewTeacherSubjects('');
   };
 
-  // Handle Add Timetable Slot
+  // Handle Save Timetable Slot
   const handleSaveNewSlot = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSlotSubject.trim()) return;
@@ -339,7 +398,7 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
     setNewSlotSubject('');
   };
 
-  // Handle Add Classroom
+  // Handle Save Classroom
   const handleSaveNewClassroom = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newRoomName.trim()) return;
@@ -357,7 +416,7 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
     setNewRoomName('');
   };
 
-  // Handle Save Student (Add or Edit)
+  // Handle Save Student
   const handleSaveStudent = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newStudentName.trim() || !newStudentRoll.trim()) return;
@@ -400,1688 +459,1550 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
     setNewStudentEmail('');
   };
 
-  const handleStartEditStudent = (student: Student) => {
-    setEditingStudent(student);
-    setNewStudentName(student.name);
-    setNewStudentRoll(student.rollNo);
-    setNewStudentGender(student.gender);
-    setNewStudentParent(student.parentName || '');
-    setNewStudentPhone(student.parentPhone || '');
-    setNewStudentEmail(student.email || '');
-    setShowAddStudentModal(true);
-  };
-
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
     setCopiedCodeId(id);
     setTimeout(() => setCopiedCodeId(null), 2000);
   };
 
-  // Filtered students for HOD student tab
-  const displayedStudents = students.filter(st => {
-    if (selectedStudentClassId !== 'all') {
-      const cls = classes.find(c => c.id === selectedStudentClassId);
-      if (!cls || !cls.studentIds.includes(st.id)) return false;
-    }
-    if (!studentSearch.trim()) return true;
-    const q = studentSearch.toLowerCase();
-    return st.name.toLowerCase().includes(q) || st.rollNo.includes(q) || st.parentPhone?.includes(q);
-  });
+  // Filtered students
+  const displayedStudents = useMemo(() => {
+    return students.filter(st => {
+      if (selectedStudentClassId !== 'all') {
+        const cls = classes.find(c => c.id === selectedStudentClassId);
+        if (!cls || !cls.studentIds.includes(st.id)) return false;
+      }
+      if (!studentSearch.trim()) return true;
+      const q = studentSearch.toLowerCase();
+      return st.name.toLowerCase().includes(q) || st.rollNo.includes(q) || st.parentPhone?.includes(q);
+    });
+  }, [students, selectedStudentClassId, classes, studentSearch]);
+
+  // Days List
+  const DAYS_LIST: DayOfWeek[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+  // Timetable Grouped & Sorted by Day
+  const timetableByDay = useMemo(() => {
+    const map: Record<DayOfWeek, TimetableSlot[]> = {
+      Monday: [],
+      Tuesday: [],
+      Wednesday: [],
+      Thursday: [],
+      Friday: [],
+      Saturday: []
+    };
+
+    timetable.forEach(slot => {
+      if (map[slot.dayOfWeek]) {
+        map[slot.dayOfWeek].push(slot);
+      }
+    });
+
+    DAYS_LIST.forEach(day => {
+      map[day].sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+    });
+
+    return map;
+  }, [timetable]);
+
+  const displayedDays = useMemo(() => {
+    if (selectedTimetableDay === 'all') return DAYS_LIST;
+    return [selectedTimetableDay];
+  }, [selectedTimetableDay, DAYS_LIST]);
+
+  // Department Analytics Calculations
+  const analyticsData = useMemo(() => {
+    const totalSessions = sessions.length;
+    let totalMarks = 0;
+    let presentMarks = 0;
+    let absentMarks = 0;
+
+    sessions.forEach(sess => {
+      Object.values(sess.records).forEach(rec => {
+        if (rec.status !== 'unmarked') {
+          totalMarks++;
+          if (rec.status === 'present') presentMarks++;
+          else if (rec.status === 'absent') absentMarks++;
+          else if (rec.status === 'late') presentMarks += 0.5;
+        }
+      });
+    });
+
+    const avgRate = totalMarks > 0 ? Math.round((presentMarks / totalMarks) * 100) : 0;
+    
+    // Defaulters calculation
+    const threshold = settings.defaulterThreshold || 50;
+    let defaultersCount = 0;
+    students.forEach(st => {
+      let stTotal = 0;
+      let stAttended = 0;
+      sessions.forEach(sess => {
+        const r = sess.records[st.id];
+        if (r && r.status !== 'unmarked') {
+          stTotal++;
+          if (r.status === 'present') stAttended++;
+          else if (r.status === 'late') stAttended += 0.5;
+        }
+      });
+      if (stTotal > 0 && (stAttended / stTotal) * 100 < threshold) {
+        defaultersCount++;
+      }
+    });
+
+    return {
+      totalSessions,
+      totalStudents: students.length,
+      totalFaculty: teachers.length,
+      totalSlots: timetable.length,
+      totalClassrooms: classrooms.length,
+      avgRate,
+      presentMarks: Math.round(presentMarks),
+      absentMarks,
+      defaultersCount
+    };
+  }, [sessions, students, teachers, timetable, classrooms, settings.defaulterThreshold]);
+
+  // Export Session CSV Helper
+  const handleExportSessionCSV = (session: AttendanceSession, sessionDay: string) => {
+    const cls = classes.find(c => c.id === session.classId) || classes[0];
+    const classStudents = students.filter(s => cls?.studentIds?.includes(s.id) || false);
+    const targetStudents = classStudents.length > 0 ? classStudents : students;
+
+    const headers = ['Roll No', 'Student Name', 'Status', 'Date', 'Day', 'Subject', 'Time Slot', 'Teacher', 'Parent Phone'];
+    const rows = targetStudents.map(st => {
+      const rec = session.records[st.id];
+      const status = rec?.status || 'unmarked';
+      return [
+        st.rollNo,
+        `"${st.name}"`,
+        status.toUpperCase(),
+        session.date,
+        sessionDay,
+        `"${session.subject || 'Lecture'}"`,
+        `"${session.timeSlot || ''}"`,
+        `"${session.teacherName || ''}"`,
+        `"${st.parentPhone || ''}"`
+      ];
+    });
+
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `Attendance_${session.date}_${sessionDay}_${session.subject || 'Lecture'}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const sendAbsentParentAlert = (student: Student, session: AttendanceSession, sessionDay: string) => {
+    const parentPhone = student.parentPhone?.replace(/\D/g, '') || '';
+    if (!parentPhone) return;
+
+    const message = 
+      `🚨 *DAILY ABSENT NOTICE - ${settings.collegeName}*\n\n` +
+      `Dear Parent / Guardian,\n` +
+      `This is to inform you that your ward:\n\n` +
+      `👤 *Student:* ${student.name}\n` +
+      `📋 *Roll Number:* ${student.rollNo}\n` +
+      `📅 *Date:* ${formatDateShort(session.date)} (${sessionDay})\n` +
+      `⏰ *Lecture:* ${session.timeSlot || session.sessionName}\n` +
+      `📚 *Subject:* ${session.subject || 'Academic Lecture'}\n` +
+      `👨‍🏫 *Faculty:* ${session.teacherName}\n` +
+      `⚠️ *Status:* ABSENT\n\n` +
+      `- *${settings.departmentName}*\n${settings.collegeName}`;
+
+    const formattedPhone = parentPhone.length === 10 ? `91${parentPhone}` : parentPhone;
+    const url = `https://wa.me/${formattedPhone}?text=${encodeURIComponent(message)}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  // Mock HOD user object for calendar permissions
+  const hodUser: AuthUser = {
+    id: 'hod-root',
+    name: settings.hodName || 'HOD',
+    role: 'hod',
+    department: settings.departmentName
+  };
+
+  // Section title mapping for header breadcrumb
+  const sectionTitleMap: Record<HodSidebarSection, { label: string; icon: any }> = {
+    students: { label: 'Enrolled Students', icon: GraduationCap },
+    timetable: { label: 'Lecture Timetable', icon: Calendar },
+    faculty: { label: 'Faculty Directory', icon: Users },
+    classrooms: { label: 'Classrooms & Labs', icon: Building },
+    attendance_log: { label: 'Attendance Logs & Date Clear', icon: ClipboardList },
+    analytics: { label: 'Department Analytics', icon: BarChart3 },
+    settings: { label: 'Campus & System Settings', icon: Settings }
+  };
+
+  const CurrentSectionIcon = sectionTitleMap[activeSection].icon;
+
+  // Render navigation item helper
+  const renderNavButton = (id: HodSidebarSection, label: string, icon: any, count?: number) => {
+    const IconComp = icon;
+    const isActive = activeSection === id;
+    return (
+      <button
+        key={id}
+        type="button"
+        onClick={() => {
+          setActiveSection(id);
+          handleCloseMobileSidebar();
+        }}
+        className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+          isActive
+            ? 'bg-gradient-to-r from-blue-600 via-blue-500 to-indigo-600 text-white shadow-md font-extrabold border-t border-blue-400'
+            : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+        }`}
+      >
+        <div className="flex items-center gap-2.5">
+          <IconComp className={`w-4 h-4 ${isActive ? 'text-white' : 'text-blue-400'}`} />
+          <span>{label}</span>
+        </div>
+        {count !== undefined && (
+          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+            isActive ? 'bg-slate-950/80 text-blue-200' : 'bg-slate-800 text-slate-300'
+          }`}>
+            {count}
+          </span>
+        )}
+      </button>
+    );
+  };
 
   return (
-    <div className="space-y-6">
+    <div className="w-full max-w-full min-w-0 flex flex-col lg:flex-row items-start gap-5 lg:gap-6">
       
-      {/* Top Banner */}
-      <div className="bg-slate-900 text-white rounded-2xl p-4 sm:p-5 shadow-md border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/30">
-            <ShieldCheck className="w-5 h-5" />
+      {/* MOBILE FLOATING BAR & TOGGLE */}
+      <div className="lg:hidden w-full bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white p-3 sm:p-3.5 rounded-2xl flex items-center justify-between border border-slate-700/80 shadow-md">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-slate-700 via-slate-800 to-blue-900/70 text-blue-400 flex items-center justify-center shrink-0 border border-blue-400/30 shadow-inner">
+            <CurrentSectionIcon className="w-4.5 h-4.5 text-blue-400" />
           </div>
-          <div>
-            <h1 className="text-sm sm:text-base font-extrabold text-white">
-              HOD Control Center
-            </h1>
-            <p className="text-xs text-slate-400">
-              {settings.hodName} &bull; {settings.departmentName}
-            </p>
+          <div className="min-w-0">
+            <span className="font-extrabold text-sm truncate block text-white">{sectionTitleMap[activeSection].label}</span>
+            <span className="text-[10.5px] font-bold text-blue-400 block truncate">HOD Sector</span>
           </div>
         </div>
-
-        {/* Global Reset Button */}
-        <button
-          id="hod-reset-campus-btn"
-          type="button"
-          onClick={() => setShowResetCampusModal(true)}
-          className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 border border-rose-700/60 text-rose-300 hover:text-white text-xs font-bold transition-all cursor-pointer shadow-xs min-h-[38px] self-start sm:self-auto"
-        >
-          <RotateCcw className="w-3.5 h-3.5" />
-          <span>Reset Campus System</span>
-        </button>
-      </div>
-
-      {/* Tabs - Smooth horizontal scroll on mobile */}
-      <div className="flex items-center gap-1.5 border-b border-slate-200 pb-2 overflow-x-auto no-scrollbar">
         
-        {/* Tab: Students */}
+        {/* Cool 3D Depth Menu Button (Theme: Grey, White, Blue Gradient with Hover Shimmer & Active Feedback) */}
         <button
-          id="hod-tab-students"
           type="button"
-          onClick={() => setActiveTab('students')}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 min-h-[38px] ${
-            activeTab === 'students'
-              ? 'bg-slate-900 text-white shadow-xs'
-              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-          }`}
+          onClick={() => {
+            setIsMobileSidebarClosing(false);
+            setIsMobileSidebarOpen(true);
+          }}
+          className="btn-depth-grey-blue flex items-center gap-2 px-4 py-2 rounded-xl text-slate-950 text-xs font-black cursor-pointer select-none group active:scale-95 shadow-md"
+          title="Open HOD Navigation Menu"
         >
-          <GraduationCap className="w-4 h-4 text-amber-400" />
-          <span>Students ({students.length})</span>
-        </button>
-
-        {/* Tab: Teachers */}
-        <button
-          id="hod-tab-teachers"
-          type="button"
-          onClick={() => setActiveTab('teachers')}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 min-h-[38px] ${
-            activeTab === 'teachers'
-              ? 'bg-slate-900 text-white shadow-xs'
-              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-          }`}
-        >
-          <Users className="w-4 h-4 text-emerald-400" />
-          <span>Faculty ({teachers.length})</span>
-        </button>
-
-        {/* Tab: Timetable */}
-        <button
-          id="hod-tab-timetable"
-          type="button"
-          onClick={() => setActiveTab('timetable')}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 min-h-[38px] ${
-            activeTab === 'timetable'
-              ? 'bg-slate-900 text-white shadow-xs'
-              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-          }`}
-        >
-          <Calendar className="w-4 h-4 text-sky-400" />
-          <span>Timetable ({timetable.length})</span>
-        </button>
-
-        {/* Tab: Classrooms */}
-        <button
-          id="hod-tab-classrooms"
-          type="button"
-          onClick={() => setActiveTab('classrooms')}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 min-h-[38px] ${
-            activeTab === 'classrooms'
-              ? 'bg-slate-900 text-white shadow-xs'
-              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-          }`}
-        >
-          <Building className="w-4 h-4 text-indigo-400" />
-          <span>Classrooms ({classrooms.length})</span>
-        </button>
-
-        {/* Tab: Settings */}
-        <button
-          id="hod-tab-settings"
-          type="button"
-          onClick={() => setActiveTab('settings')}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 min-h-[38px] ${
-            activeTab === 'settings'
-              ? 'bg-slate-900 text-white shadow-xs'
-              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-          }`}
-        >
-          <Settings className="w-4 h-4 text-amber-400" />
-          <span>Settings</span>
-        </button>
-
-        {/* Tab: Database */}
-        <button
-          id="hod-tab-database"
-          type="button"
-          onClick={() => setActiveTab('database')}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 min-h-[38px] ${
-            activeTab === 'database'
-              ? 'bg-emerald-600 text-white shadow-xs'
-              : 'bg-white text-emerald-700 hover:bg-emerald-50 border border-emerald-200'
-          }`}
-        >
-          <Database className="w-4 h-4" />
-          <span>Database</span>
+          <Menu className="w-4 h-4 text-blue-950 stroke-[2.8] transition-transform duration-300 group-hover:scale-125 group-hover:rotate-12 group-active:rotate-90" />
+          <span className="tracking-wider uppercase text-[11px] font-black text-slate-950">Menu</span>
         </button>
       </div>
 
-      {/* TAB 1: STUDENTS MANAGEMENT IN HOD SYSTEM */}
-      {activeTab === 'students' && (
-        <div className="space-y-4">
-          <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <div>
-              <h2 className="text-base font-bold text-slate-900">Department Student Directory & Enrolment</h2>
-              <p className="text-xs text-slate-500">
-                HOD authority to view, enroll, update, and manage student rosters across all divisions
-              </p>
+      {/* MOBILE DRAWER OVERLAY (Off-canvas with smooth animated entry and exit) */}
+      {isMobileSidebarOpen && (
+        <div className={`fixed inset-0 z-50 lg:hidden flex ${isMobileSidebarClosing ? 'animate-backdrop-fade-out' : 'animate-backdrop-fade'}`}>
+          {/* Backdrop */}
+          <div 
+            className="fixed inset-0 bg-slate-950/75 backdrop-blur-xs transition-opacity cursor-pointer" 
+            onClick={handleCloseMobileSidebar} 
+          />
+          {/* Drawer content with smooth slide-in and slide-out animation */}
+          <div className={`relative w-72 max-w-[85vw] bg-slate-900 text-slate-100 p-4 shadow-2xl flex flex-col justify-between overflow-y-auto z-50 h-full border-r border-slate-800 ${
+            isMobileSidebarClosing ? 'animate-drawer-slide-out' : 'animate-drawer-slide'
+          }`}>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center border border-blue-500/30">
+                    <ShieldCheck className="w-4.5 h-4.5 text-blue-400" />
+                  </div>
+                  <div>
+                    <span className="font-extrabold text-sm text-white block">HOD Navigation</span>
+                    <span className="text-[10px] text-slate-400 block">{settings.departmentName}</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCloseMobileSidebar}
+                  className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-all active:scale-90 active:translate-y-0.5 cursor-pointer"
+                  title="Close Menu"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-1">
+                <div className="px-2 py-1 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                  Academic Directory
+                </div>
+                {renderNavButton('students', 'Enrolled Students', GraduationCap, students.length)}
+                {renderNavButton('timetable', 'Lecture Timetable', Calendar, timetable.length)}
+                {renderNavButton('faculty', 'Faculty Directory', Users, teachers.length)}
+                {renderNavButton('classrooms', 'Classrooms & Labs', Building, classrooms.length)}
+              </div>
+
+              <div className="space-y-1">
+                <div className="px-2 py-1 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                  Audit & Records
+                </div>
+                {renderNavButton('attendance_log', 'Attendance Logs', ClipboardList, sessions.length)}
+                {renderNavButton('analytics', 'Department Analytics', BarChart3)}
+              </div>
+
+              <div className="space-y-1">
+                <div className="px-2 py-1 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                  Settings & Control
+                </div>
+                {renderNavButton('settings', 'Campus & Settings', Settings)}
+              </div>
             </div>
 
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                type="button"
-                onClick={onOpenImportModal}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-xs transition-all cursor-pointer"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Scan Excel / PDF</span>
-              </button>
-
+            <div className="pt-4 border-t border-slate-800">
               <button
                 type="button"
                 onClick={() => {
-                  setEditingStudent(null);
-                  setNewStudentName('');
-                  setNewStudentRoll('');
-                  setNewStudentParent('');
-                  setNewStudentPhone('');
-                  setNewStudentEmail('');
-                  setShowAddStudentModal(true);
+                  handleCloseMobileSidebar();
+                  setShowResetCampusModal(true);
                 }}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition-all shadow-xs cursor-pointer"
+                className="w-full py-2.5 px-3 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 text-rose-300 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
               >
-                <UserPlus className="w-3.5 h-3.5" />
-                <span>Enroll Student</span>
+                <RotateCcw className="w-3.5 h-3.5 text-rose-400" />
+                <span>Reset System</span>
               </button>
-
-              {students.length > 0 && (
-                <button
-                  id="hod-delete-all-students-btn"
-                  type="button"
-                  onClick={() => setShowDeleteAllStudentsModal(true)}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 font-bold text-xs transition-all shadow-xs cursor-pointer"
-                >
-                  <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-                  <span>Delete All Students</span>
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Filter Bar */}
-          <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row items-center gap-3">
-            <div className="w-full sm:w-56">
-              <select
-                value={selectedStudentClassId}
-                onChange={(e) => setSelectedStudentClassId(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-800 focus:outline-hidden"
-              >
-                <option value="all">All Classes & Divisions ({students.length})</option>
-                {classes.map(c => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} ({c.studentIds.length} students)
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="relative flex-1 w-full">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={studentSearch}
-                onChange={(e) => setStudentSearch(e.target.value)}
-                placeholder="Search students by name, roll number, or phone..."
-                className="w-full pl-8 pr-3 py-1.5 text-xs text-slate-900 bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-slate-900"
-              />
-            </div>
-          </div>
-
-          {/* Student Table */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-100 text-slate-800 font-bold uppercase tracking-wider text-[11px]">
-                  <tr>
-                    <th className="py-3 px-4">Roll</th>
-                    <th className="py-3 px-4">Student Name</th>
-                    <th className="py-3 px-4">Gender</th>
-                    <th className="py-3 px-4">Enrolled Class</th>
-                    <th className="py-3 px-4">Parent WhatsApp</th>
-                    <th className="py-3 px-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {displayedStudents.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="py-10 text-center text-slate-500 font-medium">
-                        No students found matching your criteria. Click "Enroll Student" or "Scan Excel / PDF" to add.
-                      </td>
-                    </tr>
-                  ) : (
-                    displayedStudents.map(student => {
-                      const studentClasses = classes.filter(c => c.studentIds.includes(student.id));
-                      return (
-                        <tr key={student.id} className="hover:bg-slate-50 transition-colors">
-                          <td className="py-3 px-4 font-mono font-bold text-slate-800">#{student.rollNo}</td>
-                          <td className="py-3 px-4 font-bold text-slate-900">{student.name}</td>
-                          <td className="py-3 px-4 text-slate-600">{student.gender}</td>
-                          <td className="py-3 px-4">
-                            <div className="flex flex-wrap gap-1">
-                              {studentClasses.map(c => (
-                                <span key={c.id} className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[10px] font-bold border border-slate-200">
-                                  {c.name}
-                                </span>
-                              ))}
-                            </div>
-                          </td>
-                          <td className="py-3 px-4 font-mono text-slate-700">
-                            {student.parentPhone ? (
-                              <span className="inline-flex items-center gap-1 text-emerald-800 font-semibold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                                <Phone className="w-3 h-3 text-[#25D366]" />
-                                {student.parentPhone}
-                              </span>
-                            ) : (
-                              '—'
-                            )}
-                          </td>
-                          <td className="py-3 px-4 text-right">
-                            <div className="flex items-center justify-end gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => handleStartEditStudent(student)}
-                                className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-                                title="Edit student details"
-                              >
-                                <Edit3 className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setStudentToDelete(student)}
-                                className="p-1.5 text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                                title="Delete student"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
             </div>
           </div>
         </div>
       )}
 
-      {/* TAB 2: TEACHER MANAGEMENT (Req 6) */}
-      {activeTab === 'teachers' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-base font-bold text-slate-900">Faculty Roster & Unique Login Codes</h2>
-              <p className="text-xs text-slate-500">
-                HOD assigns unique codes and subjects to teachers for authorized login
+      {/* ========================================================================= */}
+      {/* DESKTOP SIDEBAR (Sticky on scroll, no nested scrollbar fighting) */}
+      {/* ========================================================================= */}
+      <aside className="hidden lg:flex w-64 xl:w-72 shrink-0 flex-col bg-slate-900 text-slate-100 rounded-3xl border border-slate-800/90 shadow-sm sticky top-20 self-start max-h-[calc(100vh-5.5rem)] overflow-y-auto overscroll-contain no-scrollbar">
+        {/* Sidebar Header: Identity & Status */}
+        <div className="p-4.5 xl:p-5 border-b border-slate-800/90 space-y-2.5">
+          <div className="flex items-center gap-2.5 xl:gap-3">
+            <div className="w-9 h-9 xl:w-10 xl:h-10 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/30 shadow-inner">
+              <ShieldCheck className="w-5 h-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-xs xl:text-sm font-extrabold text-white truncate tracking-tight">
+                HOD Control Center
+              </h2>
+              <p className="text-[11px] text-amber-400 font-bold truncate">
+                {settings.hodName || 'Department Head'}
               </p>
             </div>
-
-            <button
-              id="add-teacher-button"
-              type="button"
-              onClick={() => setShowAddTeacherModal(true)}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Add New Teacher</span>
-            </button>
           </div>
 
-          {/* Teacher Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {teachers.map(teacher => (
-              <div 
-                key={teacher.id}
-                className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-xs space-y-3.5"
+          <div className="p-2 bg-slate-800/60 rounded-xl border border-slate-700/60 text-[10.5px] xl:text-[11px] text-slate-300 flex items-center justify-between">
+            <span className="text-slate-400 font-medium truncate">{settings.departmentName}</span>
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0 ml-1.5" />
+          </div>
+        </div>
+
+        {/* Navigation Sections */}
+        <nav className="p-3 xl:p-3.5 space-y-4 flex-1">
+          {/* Category: Academic Directory */}
+          <div className="space-y-1">
+            <div className="px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider text-slate-400">
+              Academic Directory
+            </div>
+            {renderNavButton('students', 'Enrolled Students', GraduationCap, students.length)}
+            {renderNavButton('timetable', 'Lecture Timetable', Calendar, timetable.length)}
+            {renderNavButton('faculty', 'Faculty Directory', Users, teachers.length)}
+            {renderNavButton('classrooms', 'Classrooms & Labs', Building, classrooms.length)}
+          </div>
+
+          {/* Category: Logs & Audits */}
+          <div className="space-y-1">
+            <div className="px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider text-slate-400">
+              Audit & Records
+            </div>
+            {renderNavButton('attendance_log', 'Attendance Logs', ClipboardList, sessions.length)}
+            {renderNavButton('analytics', 'Department Analytics', BarChart3)}
+          </div>
+
+          {/* Category: System & Configuration */}
+          <div className="space-y-1">
+            <div className="px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider text-slate-400">
+              Settings & Control
+            </div>
+            {renderNavButton('settings', 'Campus & Settings', Settings)}
+          </div>
+        </nav>
+
+        {/* Sidebar Footer: Reset Button */}
+        <div className="p-3.5 xl:p-4 border-t border-slate-800/90 bg-slate-950/40">
+          <button
+            type="button"
+            onClick={() => setShowResetCampusModal(true)}
+            className="w-full py-2 px-3 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 text-rose-300 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
+          >
+            <RotateCcw className="w-3.5 h-3.5 text-rose-400" />
+            <span>Reset System</span>
+          </button>
+        </div>
+      </aside>
+
+      {/* ========================================================================= */}
+      {/* MAIN CONTENT AREA (Clean fluid container without nested overflow trapped) */}
+      {/* ========================================================================= */}
+      <div className="flex-1 w-full min-w-0 max-w-full space-y-5">
+        
+        {/* SECTION 1: ENROLLED STUDENTS */}
+        {activeSection === 'students' && (
+          <div className="space-y-4 animate-fadeIn w-full min-w-0">
+            {/* Top Action Banner */}
+            <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200/90 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-center gap-2.5">
+                <span className="p-2 rounded-xl bg-amber-50 text-amber-600 border border-amber-200">
+                  <GraduationCap className="w-5 h-5" />
+                </span>
+                <div>
+                  <h2 className="text-base sm:text-lg font-black text-slate-900">Enrolled Students Roster</h2>
+                  <p className="text-xs text-slate-500">
+                    View, enroll, search, and manage student records across all division groups
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={onOpenImportModal}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-xs transition-all cursor-pointer shadow-2xs active:scale-95"
+                >
+                  <Sparkles className="w-4 h-4 text-emerald-600" />
+                  <span>Scan Excel / PDF</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingStudent(null);
+                    setNewStudentName('');
+                    setNewStudentRoll('');
+                    setNewStudentParent('');
+                    setNewStudentPhone('');
+                    setNewStudentEmail('');
+                    setShowAddStudentModal(true);
+                  }}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition-all shadow-sm cursor-pointer active:scale-95"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>Enroll Student</span>
+                </button>
+
+                {students.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowDeleteAllStudentsModal(true)}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 font-bold text-xs transition-all cursor-pointer active:scale-95"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                    <span>Delete All</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Filter and Search Bar */}
+            <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs flex flex-col sm:flex-row items-center gap-3">
+              <div className="w-full sm:w-60">
+                <select
+                  value={selectedStudentClassId}
+                  onChange={(e) => setSelectedStudentClassId(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-slate-900"
+                >
+                  <option value="all">All Classes & Divisions ({students.length})</option>
+                  {classes.map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.studentIds.length} students)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="relative flex-1 w-full">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={studentSearch}
+                  onChange={(e) => setStudentSearch(e.target.value)}
+                  placeholder="Search students by name, roll no, or phone..."
+                  className="w-full pl-9 pr-3.5 py-2 text-xs text-slate-900 bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-slate-900"
+                />
+              </div>
+            </div>
+
+            {/* Students Table with safe horizontal containment */}
+            <div className="bg-white rounded-3xl border border-slate-200/90 shadow-sm overflow-hidden w-full max-w-full min-w-0">
+              <div className="overflow-x-auto w-full max-w-full">
+                <table className="w-full min-w-[640px] text-left text-xs">
+                  <thead className="bg-slate-100/80 text-slate-800 font-bold uppercase tracking-wider text-[11px] border-b border-slate-200 whitespace-nowrap">
+                    <tr>
+                      <th className="py-3 px-4">Roll</th>
+                      <th className="py-3 px-4">Student Name</th>
+                      <th className="py-3 px-4">Gender</th>
+                      <th className="py-3 px-4">Enrolled Class</th>
+                      <th className="py-3 px-4">Parent WhatsApp</th>
+                      <th className="py-3 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {displayedStudents.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="py-12 text-center text-slate-500 font-medium">
+                          No students found matching your criteria. Click "Enroll Student" or "Scan Excel / PDF" to add.
+                        </td>
+                      </tr>
+                    ) : (
+                      displayedStudents.map(student => {
+                        const studentClasses = classes.filter(c => c.studentIds.includes(student.id));
+                        return (
+                          <tr key={student.id} className="hover:bg-slate-50/80 transition-colors">
+                            <td className="py-3 px-4 font-mono font-bold text-slate-800 whitespace-nowrap">#{student.rollNo}</td>
+                            <td className="py-3 px-4 font-bold text-slate-900 whitespace-nowrap">{student.name}</td>
+                            <td className="py-3 px-4 text-slate-600 whitespace-nowrap">{student.gender}</td>
+                            <td className="py-3 px-4">
+                              <div className="flex flex-wrap gap-1">
+                                {studentClasses.map(c => (
+                                  <span key={c.id} className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[10px] font-bold border border-slate-200 whitespace-nowrap">
+                                    {c.name}
+                                  </span>
+                                ))}
+                              </div>
+                            </td>
+                            <td className="py-3 px-4 font-mono text-slate-700 whitespace-nowrap">
+                              {student.parentPhone ? (
+                                <span className="inline-flex items-center gap-1 text-emerald-800 font-semibold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                                  <Phone className="w-3 h-3 text-[#25D366]" />
+                                  {student.parentPhone}
+                                </span>
+                              ) : (
+                                '—'
+                              )}
+                            </td>
+                            <td className="py-3 px-4 text-right whitespace-nowrap">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingStudent(student);
+                                    setNewStudentName(student.name);
+                                    setNewStudentRoll(student.rollNo);
+                                    setNewStudentGender(student.gender);
+                                    setNewStudentParent(student.parentName || '');
+                                    setNewStudentPhone(student.parentPhone || '');
+                                    setNewStudentEmail(student.email || '');
+                                    setShowAddStudentModal(true);
+                                  }}
+                                  className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                                  title="Edit student details"
+                                >
+                                  <Edit3 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setStudentToDelete(student)}
+                                  className="p-1.5 text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                  title="Delete student"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* SECTION 2: TIMETABLE & LECTURE SCHEDULE (Sorted by Day with Zero Horizontal Scrolling) */}
+        {activeSection === 'timetable' && (
+          <div className="space-y-5 animate-fadeIn w-full min-w-0">
+            {/* Top Action & Overview Banner */}
+            <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200/90 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-sky-50 text-sky-600 flex items-center justify-center border border-sky-200 shrink-0">
+                  <Calendar className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base sm:text-lg font-black text-slate-900">
+                    Weekly Timetable by Day
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Lectures organized day-by-day with auto-fitting faculty, subjects, and classroom details
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setShowAddSlotModal(true)}
+                  className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs transition-all shadow-sm cursor-pointer active:scale-95"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Schedule New Lecture</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Day Selector Navigation Tabs */}
+            <div className="bg-white p-2 sm:p-2.5 rounded-2xl border border-slate-200/90 shadow-2xs">
+              <div className="flex items-center gap-1 sm:gap-1.5 overflow-x-auto no-scrollbar w-full">
+                <button
+                  type="button"
+                  onClick={() => setSelectedTimetableDay('all')}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+                    selectedTimetableDay === 'all'
+                      ? 'bg-slate-900 text-white shadow-xs'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  <span>All Days</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-md ${
+                    selectedTimetableDay === 'all' ? 'bg-slate-800 text-slate-200' : 'bg-slate-100 text-slate-600'
+                  }`}>
+                    {timetable.length}
+                  </span>
+                </button>
+
+                {DAYS_LIST.map(day => {
+                  const count = timetableByDay[day]?.length || 0;
+                  const isSelected = selectedTimetableDay === day;
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      onClick={() => setSelectedTimetableDay(day)}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+                        isSelected
+                          ? 'bg-sky-600 text-white shadow-xs'
+                          : 'text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      <span>{day}</span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-md ${
+                        isSelected ? 'bg-sky-700 text-white' : 'bg-slate-100 text-slate-600'
+                      }`}>
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Day-Wise Schedule Sections (Fluid responsive cards with zero horizontal scroll) */}
+            <div className="space-y-4">
+              {displayedDays.map(day => {
+                const slots = timetableByDay[day] || [];
+                return (
+                  <div 
+                    key={day} 
+                    className="bg-white rounded-3xl border border-slate-200/90 p-4 sm:p-5 shadow-sm space-y-4"
+                  >
+                    {/* Day Section Header */}
+                    <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-8 h-8 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center text-xs font-black">
+                          {day.slice(0, 3)}
+                        </span>
+                        <div>
+                          <h3 className="text-sm sm:text-base font-extrabold text-slate-900">{day}</h3>
+                          <p className="text-[11px] text-slate-400">
+                            {slots.length === 0 ? 'No lectures scheduled' : `${slots.length} lecture ${slots.length === 1 ? 'slot' : 'slots'} scheduled`}
+                          </p>
+                        </div>
+                      </div>
+
+                      <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${
+                        slots.length > 0 
+                          ? 'bg-sky-50 text-sky-800 border border-sky-200' 
+                          : 'bg-slate-100 text-slate-500'
+                      }`}>
+                        {slots.length} {slots.length === 1 ? 'Lecture' : 'Lectures'}
+                      </span>
+                    </div>
+
+                    {/* Slots in this Day */}
+                    {slots.length === 0 ? (
+                      <div className="py-6 text-center text-slate-400 text-xs bg-slate-50/60 rounded-2xl border border-dashed border-slate-200">
+                        No lectures scheduled for {day}. Click "Schedule New Lecture" to add.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
+                        {slots.map(slot => (
+                          <div 
+                            key={slot.id}
+                            className="bg-slate-50/70 hover:bg-white rounded-2xl border border-slate-200 hover:border-sky-300 p-4 shadow-2xs hover:shadow-xs transition-all duration-200 flex flex-col justify-between gap-3 group"
+                          >
+                            {/* Top row: Time & Delete */}
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="inline-flex items-center gap-1.5 text-xs font-mono font-bold text-sky-800 bg-sky-100/90 px-2.5 py-1 rounded-lg border border-sky-200">
+                                <Clock className="w-3.5 h-3.5 text-sky-600" />
+                                <span>{slot.timeSlotLabel}</span>
+                              </span>
+
+                              <button
+                                type="button"
+                                onClick={() => onDeleteTimetableSlot(slot.id)}
+                                className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer opacity-75 group-hover:opacity-100"
+                                title="Remove lecture slot"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+
+                            {/* Middle row: Subject Title & Class */}
+                            <div className="space-y-1.5">
+                              <h4 className="font-extrabold text-slate-900 text-sm leading-snug break-words">
+                                {slot.subject}
+                              </h4>
+                              <span className="inline-block text-[11px] font-bold text-slate-700 bg-white border border-slate-200 px-2 py-0.5 rounded-md">
+                                {slot.className}
+                              </span>
+                            </div>
+
+                            {/* Bottom row: Teacher & Classroom */}
+                            <div className="pt-2 border-t border-slate-200/80 text-xs space-y-1">
+                              <div className="flex items-center gap-1.5 text-slate-700 font-medium truncate">
+                                <Users className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                <span className="truncate">Faculty: <strong className="text-slate-900">{slot.teacherName}</strong></span>
+                              </div>
+                              <div className="flex items-center gap-1.5 text-slate-500 text-[11px] truncate">
+                                <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                <span className="truncate">{slot.roomName}</span>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* SECTION 3: FACULTY DIRECTORY */}
+        {activeSection === 'faculty' && (
+          <div className="space-y-4 animate-fadeIn w-full min-w-0">
+            <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200/90 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-2.5">
+                <span className="p-2 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-200">
+                  <Users className="w-5 h-5" />
+                </span>
+                <div>
+                  <h2 className="text-base sm:text-lg font-black text-slate-900">Faculty Roster & Login Credentials</h2>
+                  <p className="text-xs text-slate-500">
+                    HOD assigns unique codes and subjects to teachers for authorized login
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowAddTeacherModal(true)}
+                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all shadow-sm cursor-pointer active:scale-95"
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center text-sm border border-emerald-200">
-                      {teacher.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                <Plus className="w-4 h-4" />
+                <span>Add New Faculty</span>
+              </button>
+            </div>
+
+            {/* Teachers Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {teachers.map(teacher => (
+                <div 
+                  key={teacher.id}
+                  className="bg-white rounded-3xl border border-slate-200 p-4 sm:p-5 shadow-xs space-y-3.5"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center text-sm border border-emerald-200">
+                        {teacher.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-bold text-slate-900">{teacher.name}</h3>
+                        <p className="text-xs text-slate-500">{teacher.email}</p>
+                      </div>
                     </div>
-                    <div>
-                      <h3 className="text-sm font-bold text-slate-900">{teacher.name}</h3>
-                      <p className="text-xs text-slate-500">{teacher.email}</p>
-                    </div>
+
+                    {teachers.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => onDeleteTeacher(teacher.id)}
+                        className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"
+                        title="Remove teacher"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
 
-                  {teachers.length > 1 && (
+                  {/* Unique Login Credentials Badge */}
+                  <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <p className="text-[10px] uppercase font-bold text-slate-500">Unique Login Code & Passcode</p>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-extrabold text-sm text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-lg border border-emerald-300">
+                          {teacher.uniqueCode}
+                        </span>
+                        <span className="text-xs font-mono text-slate-500">
+                          Pass: <strong className="text-slate-800">{teacher.passcode}</strong>
+                        </span>
+                      </div>
+                    </div>
+
                     <button
                       type="button"
-                      onClick={() => onDeleteTeacher(teacher.id)}
-                      className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"
-                      title="Remove teacher"
+                      onClick={() => copyToClipboard(teacher.uniqueCode, teacher.id)}
+                      className="p-2 rounded-xl bg-white border border-slate-200 text-slate-600 hover:text-emerald-700 hover:bg-emerald-50 transition-all cursor-pointer shadow-2xs"
+                      title="Copy teacher code"
+                    >
+                      {copiedCodeId === teacher.id ? (
+                        <Check className="w-4 h-4 text-emerald-600" />
+                      ) : (
+                        <Copy className="w-4 h-4" />
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Respective Subjects */}
+                  <div className="space-y-1">
+                    <p className="text-[11px] font-bold text-slate-600">Assigned Subjects:</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {teacher.subjects.map((sub, idx) => (
+                        <span key={idx} className="px-2.5 py-0.5 rounded-lg bg-sky-50 text-sky-800 text-[11px] font-medium border border-sky-200">
+                          {sub}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* SECTION 4: CLASSROOMS & LABS */}
+        {activeSection === 'classrooms' && (
+          <div className="space-y-4 animate-fadeIn w-full min-w-0">
+            <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200/90 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-2.5">
+                <span className="p-2 rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-200">
+                  <Building className="w-5 h-5" />
+                </span>
+                <div>
+                  <h2 className="text-base sm:text-lg font-black text-slate-900">Campus Classrooms & Laboratories</h2>
+                  <p className="text-xs text-slate-500">
+                    Manage classroom capacities, lab rooms, and academic allocation
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowAddRoomModal(true)}
+                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all shadow-sm cursor-pointer active:scale-95"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Classroom / Lab</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {classrooms.map(room => (
+                <div 
+                  key={room.id}
+                  className="bg-white rounded-3xl border border-slate-200 p-4 sm:p-5 shadow-xs space-y-3"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-700 flex items-center justify-center border border-indigo-200">
+                        <School className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-bold text-slate-900">{room.name}</h3>
+                        <p className="text-xs text-slate-500 flex items-center gap-1">
+                          <MapPin className="w-3 h-3 text-slate-400" />
+                          {room.building}
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => onDeleteClassroom(room.id)}
+                      className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 cursor-pointer transition-colors"
+                      title="Delete classroom"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
-                  )}
-                </div>
-
-                {/* Unique Login Credentials Badge */}
-                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <p className="text-[10px] uppercase font-bold text-slate-500">Unique Login Code & Passcode</p>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono font-extrabold text-sm text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md border border-emerald-300">
-                        {teacher.uniqueCode}
-                      </span>
-                      <span className="text-xs font-mono text-slate-500">
-                        Pass: <strong className="text-slate-800">{teacher.passcode}</strong>
-                      </span>
-                    </div>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => copyToClipboard(teacher.uniqueCode, teacher.id)}
-                    className="p-2 rounded-lg bg-white border border-slate-200 text-slate-600 hover:text-emerald-700 hover:bg-emerald-50 transition-all cursor-pointer shadow-2xs"
-                    title="Copy teacher code"
-                  >
-                    {copiedCodeId === teacher.id ? (
-                      <Check className="w-4 h-4 text-emerald-600" />
-                    ) : (
-                      <Copy className="w-4 h-4" />
-                    )}
-                  </button>
-                </div>
-
-                {/* Respective Subjects */}
-                <div className="space-y-1">
-                  <p className="text-[11px] font-bold text-slate-600">Assigned Subjects:</p>
-                  <div className="flex flex-wrap gap-1">
-                    {teacher.subjects.map((sub, idx) => (
-                      <span key={idx} className="px-2 py-0.5 rounded-md bg-sky-50 text-sky-800 text-[11px] font-medium border border-sky-200">
-                        {sub}
-                      </span>
-                    ))}
+                  <div className="flex items-center justify-between text-xs pt-3 border-t border-slate-100">
+                    <span className="text-slate-500 font-medium">Capacity:</span>
+                    <span className="font-mono font-bold text-slate-800">{room.capacity} Students</span>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* TAB 3: TIMETABLE & LECTURE HOURS */}
-      {activeTab === 'timetable' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-base font-bold text-slate-900">Weekly Lecture Schedule & Timetable</h2>
-              <p className="text-xs text-slate-500">
-                Configure lecture hours, subjects, classrooms and assigned teachers
-              </p>
-            </div>
-
-            <button
-              id="add-timetable-slot-button"
-              type="button"
-              onClick={() => setShowAddSlotModal(true)}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Schedule New Lecture Hour</span>
-            </button>
-          </div>
-
-          <div className="border border-slate-200 rounded-2xl overflow-hidden bg-white shadow-xs">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-100 text-slate-800 font-bold uppercase tracking-wider">
-                  <tr>
-                    <th className="py-3 px-4">Day</th>
-                    <th className="py-3 px-4">Time Slot</th>
-                    <th className="py-3 px-4">Subject</th>
-                    <th className="py-3 px-4">Class / Division</th>
-                    <th className="py-3 px-4">Classroom</th>
-                    <th className="py-3 px-4">Teacher</th>
-                    <th className="py-3 px-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {timetable.map(slot => (
-                    <tr key={slot.id} className="hover:bg-slate-50">
-                      <td className="py-3 px-4 font-bold text-slate-900">{slot.dayOfWeek}</td>
-                      <td className="py-3 px-4 font-mono font-semibold text-sky-800">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-sky-50 border border-sky-200">
-                          <Clock className="w-3 h-3 text-sky-600" />
-                          <span>{slot.timeSlotLabel}</span>
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 font-bold text-slate-900">{slot.subject}</td>
-                      <td className="py-3 px-4 text-slate-700">{slot.className}</td>
-                      <td className="py-3 px-4 text-slate-600">{slot.roomName}</td>
-                      <td className="py-3 px-4 text-slate-800 font-medium">{slot.teacherName}</td>
-                      <td className="py-3 px-4 text-right">
-                        <button
-                          type="button"
-                          onClick={() => onDeleteTimetableSlot(slot.id)}
-                          className="text-slate-400 hover:text-rose-600 p-1 rounded-md hover:bg-rose-50 transition-colors cursor-pointer"
-                          title="Delete slot"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              ))}
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* TAB 4: CLASSROOMS & LABS */}
-      {activeTab === 'classrooms' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-base font-bold text-slate-900">Campus Classrooms & Laboratories</h2>
-              <p className="text-xs text-slate-500">
-                Manage room capacities, wings, and allocation for lectures and practical sessions
-              </p>
-            </div>
-
-            <button
-              id="add-classroom-button"
-              type="button"
-              onClick={() => setShowAddRoomModal(true)}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Add Classroom / Lab</span>
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {classrooms.map(room => (
-              <div 
-                key={room.id}
-                className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs space-y-3"
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-700 flex items-center justify-center border border-indigo-200">
-                      <School className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-bold text-slate-900">{room.name}</h3>
-                      <p className="text-xs text-slate-500 flex items-center gap-1">
-                        <MapPin className="w-3 h-3" />
-                        {room.building}
-                      </p>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => onDeleteClassroom(room.id)}
-                    className="text-slate-400 hover:text-rose-600 p-1 rounded-md hover:bg-rose-50 cursor-pointer"
-                    title="Delete space"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-100">
-                  <span className="text-slate-500 font-medium">Capacity:</span>
-                  <span className="font-mono font-bold text-slate-800">{room.capacity} Students</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* TAB 5: CAMPUS & SYSTEM SETTINGS */}
-      {activeTab === 'settings' && (
-        <div className="space-y-6">
-
-          {/* CARD 1: HOD ADMINISTRATIVE LOGIN CREDENTIALS & SECURITY */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-xs space-y-5">
-            <div className="flex items-start justify-between flex-wrap gap-2 pb-3 border-b border-slate-100">
+        {/* SECTION 5: ATTENDANCE LOGS & DATE CLEAR */}
+        {activeSection === 'attendance_log' && (
+          <div className="space-y-4 animate-fadeIn w-full min-w-0">
+            <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200/90 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-200/80">
-                  <ShieldCheck className="w-5 h-5 stroke-[2.2]" />
-                </div>
+                <span className="p-2 rounded-xl bg-rose-50 text-rose-600 border border-rose-200">
+                  <ClipboardList className="w-5 h-5" />
+                </span>
                 <div>
-                  <h2 className="text-base font-bold text-slate-900">
-                    HOD Login Credentials & Security
-                  </h2>
+                  <h2 className="text-base sm:text-lg font-black text-slate-900">Attendance Log & Date Clear Audit</h2>
                   <p className="text-xs text-slate-500">
-                    Change your administrative username and password with cryptographic SHA-256 integrity
+                    Inspect recorded attendance sessions by date. Click any date on the calendar to view records or clear a specific day's attendance.
                   </p>
                 </div>
               </div>
+            </div>
 
-              <div className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-200/80 px-2.5 py-1 rounded-full text-emerald-800 text-[11px] font-bold">
-                <Lock className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Encrypted Security</span>
+            {/* Embedded Attendance Calendar for HOD */}
+            <div className="w-full min-w-0">
+              <AttendanceCalendar
+                sessions={sessions}
+                classes={classes}
+                students={students}
+                settings={settings}
+                selectedDate={calendarSelectedDate}
+                onSelectDate={(dateStr) => setCalendarSelectedDate(dateStr)}
+                onExportSessionCSV={handleExportSessionCSV}
+                sendAbsentParentAlert={sendAbsentParentAlert}
+                onClearDateAttendance={onClearDateAttendance}
+                onClearSession={onClearSession}
+                currentUser={hodUser}
+                timetable={timetable}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* SECTION 6: DEPARTMENT ANALYTICS */}
+        {activeSection === 'analytics' && (
+          <div className="space-y-4 animate-fadeIn w-full min-w-0">
+            <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200/90 shadow-sm">
+              <div className="flex items-center gap-2.5">
+                <span className="p-2 rounded-xl bg-teal-50 text-teal-600 border border-teal-200">
+                  <BarChart3 className="w-5 h-5" />
+                </span>
+                <div>
+                  <h2 className="text-base sm:text-lg font-black text-slate-900">Department Overview & Analytics</h2>
+                  <p className="text-xs text-slate-500">
+                    High-level academic attendance statistics, session counts, and student compliance
+                  </p>
+                </div>
               </div>
             </div>
 
-            {credentialSuccess && (
-              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 font-semibold flex items-center gap-2 animate-in fade-in">
-                <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>{credentialSuccess}</span>
+            {/* Metrics Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-2">
+                <span className="text-[11px] font-bold text-slate-500 uppercase">Overall Attendance Rate</span>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-3xl font-black text-slate-900 font-mono">{analyticsData.avgRate}%</span>
+                </div>
+                <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                  <div className="bg-emerald-500 h-full" style={{ width: `${analyticsData.avgRate}%` }} />
+                </div>
               </div>
-            )}
 
-            {credentialError && (
-              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 font-semibold flex items-center gap-2 animate-in fade-in">
-                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-                <span>{credentialError}</span>
+              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-2">
+                <span className="text-[11px] font-bold text-slate-500 uppercase">Conducted Lectures</span>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-3xl font-black text-sky-600 font-mono">{analyticsData.totalSessions}</span>
+                  <span className="text-xs text-slate-500 font-medium">sessions</span>
+                </div>
+                <p className="text-[11px] text-slate-400">Across all scheduled timetable hours</p>
               </div>
-            )}
 
-            <form onSubmit={handleUpdateHodCredentials} className="space-y-4">
-              
-              {/* Current Password Verification */}
-              <div className="space-y-1.5 max-w-md">
-                <label className="block text-xs font-bold text-slate-700">
-                  Current HOD Password <span className="text-rose-500">*</span>
+              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-2">
+                <span className="text-[11px] font-bold text-slate-500 uppercase">Enrolled Students</span>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-3xl font-black text-emerald-600 font-mono">{analyticsData.totalStudents}</span>
+                  <span className="text-xs text-slate-500 font-medium">active</span>
+                </div>
+                <p className="text-[11px] text-slate-400">Enrolled in department database</p>
+              </div>
+
+              <div className="bg-white p-5 rounded-3xl border border-rose-200 shadow-2xs space-y-2 bg-rose-50/30">
+                <span className="text-[11px] font-bold text-rose-600 uppercase">Defaulters (&lt;{settings.defaulterThreshold}%)</span>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-3xl font-black text-rose-600 font-mono">{analyticsData.defaultersCount}</span>
+                  <span className="text-xs text-rose-500 font-medium">students</span>
+                </div>
+                <p className="text-[11px] text-rose-400">Requiring academic follow-up</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* SECTION 7: CAMPUS & SYSTEM SETTINGS */}
+        {activeSection === 'settings' && (
+          <div className="space-y-5 animate-fadeIn w-full min-w-0">
+            
+            {/* CARD 1: HOD LOGIN CREDENTIALS & ZERO-LEAK SECURITY */}
+            <div className="bg-white rounded-3xl border border-slate-200/90 p-5 sm:p-6 shadow-sm space-y-5">
+              <div className="flex items-start justify-between flex-wrap gap-3 pb-3.5 border-b border-slate-100">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-gradient-to-b from-amber-50 to-amber-100/80 text-amber-700 flex items-center justify-center border border-amber-300 shadow-inner">
+                    <Lock className="w-5 h-5 stroke-[2.4]" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                      <span>HOD Administrative Credentials & Security</span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200">
+                        SHA-256
+                      </span>
+                    </h2>
+                    <p className="text-xs text-slate-500">
+                      Configure your HOD login username, password, and cryptographic zero-leak integrity protection
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-bold px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 shadow-2xs">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                    Zero Data Leak Active
+                  </span>
+                </div>
+              </div>
+
+              {credentialSuccess && (
+                <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-2xl text-xs text-emerald-900 font-bold flex items-center gap-2.5 animate-fadeIn shadow-2xs">
+                  <CheckCircle2 className="w-4.5 h-4.5 text-emerald-600 shrink-0" />
+                  <span>{credentialSuccess}</span>
+                </div>
+              )}
+
+              {credentialError && (
+                <div className="p-3.5 bg-rose-50 border border-rose-300 rounded-2xl text-xs text-rose-900 font-bold flex items-center gap-2.5 animate-fadeIn shadow-2xs">
+                  <AlertCircle className="w-4.5 h-4.5 text-rose-600 shrink-0" />
+                  <span>{credentialError}</span>
+                </div>
+              )}
+
+              {/* Mode Selection: Both / Username Only / Password Only */}
+              <div className="space-y-1.5 pt-1">
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider text-[11px]">
+                  Select Credential Update Scope
                 </label>
-                <div className="relative flex items-center">
-                  <input
-                    type={showCurrentPassword ? 'text' : 'password'}
-                    value={currentPasswordInput}
-                    onChange={(e) => setCurrentPasswordInput(e.target.value)}
-                    placeholder="Enter current password to authorize changes"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl pl-3.5 pr-10 py-2.5 text-xs sm:text-sm font-mono text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500"
-                    required
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowCurrentPassword(!showCurrentPassword)}
-                    className="absolute right-3 text-slate-400 hover:text-slate-600 cursor-pointer"
-                  >
-                    {showCurrentPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-                <p className="text-[11px] text-slate-400">Default was: dyp123</p>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-100">
-                {/* New Username / Credential */}
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-bold text-slate-700">
-                    New HOD Username / Login ID <span className="text-rose-500">*</span>
-                  </label>
-                  <div className="relative flex items-center">
-                    <input
-                      type="text"
-                      value={newUsernameInput}
-                      onChange={(e) => setNewUsernameInput(e.target.value)}
-                      placeholder="e.g. dyp"
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-semibold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500"
-                      required
-                    />
-                  </div>
-                  <p className="text-[11px] text-slate-400">Used to sign in under HOD / Admin tab (e.g. dyp)</p>
-                </div>
-
-                {/* New Password */}
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-bold text-slate-700">
-                    New Password <span className="text-rose-500">*</span>
-                  </label>
-                  <div className="relative flex items-center">
-                    <input
-                      type={showNewPassword ? 'text' : 'password'}
-                      value={newPasswordInput}
-                      onChange={(e) => setNewPasswordInput(e.target.value)}
-                      placeholder="Minimum 6 characters"
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl pl-3.5 pr-10 py-2.5 text-xs sm:text-sm font-mono text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500"
-                      required
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowNewPassword(!showNewPassword)}
-                      className="absolute right-3 text-slate-400 hover:text-slate-600 cursor-pointer"
-                    >
-                      {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-
-                  {/* Password Strength Indicator */}
-                  {newPasswordInput && (
-                    <div className="pt-1 space-y-1">
-                      {(() => {
-                        const strength = evaluatePasswordStrength(newPasswordInput);
-                        return (
-                          <div>
-                            <div className="flex items-center justify-between text-[11px] font-bold">
-                              <span className="text-slate-500">Strength:</span>
-                              <span className={strength.color}>{strength.label}</span>
-                            </div>
-                            <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden flex gap-0.5 mt-1">
-                              {[1, 2, 3, 4].map((step) => (
-                                <div
-                                  key={step}
-                                  className={`h-full flex-1 transition-all ${
-                                    step <= strength.score ? strength.bgColor : 'bg-slate-200'
-                                  }`}
-                                />
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  )}
-                </div>
-
-                {/* Confirm New Password */}
-                <div className="space-y-1.5 sm:col-start-2">
-                  <label className="block text-xs font-bold text-slate-700">
-                    Confirm New Password <span className="text-rose-500">*</span>
-                  </label>
-                  <div className="relative flex items-center">
-                    <input
-                      type={showConfirmPassword ? 'text' : 'password'}
-                      value={confirmPasswordInput}
-                      onChange={(e) => setConfirmPasswordInput(e.target.value)}
-                      placeholder="Re-type new password"
-                      className={`w-full bg-slate-50 border rounded-xl pl-3.5 pr-10 py-2.5 text-xs sm:text-sm font-mono text-slate-900 focus:outline-hidden focus:ring-2 ${
-                        confirmPasswordInput && confirmPasswordInput !== newPasswordInput
-                          ? 'border-rose-400 focus:ring-rose-200'
-                          : 'border-slate-300 focus:ring-amber-500/30'
-                      }`}
-                      required
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                      className="absolute right-3 text-slate-400 hover:text-slate-600 cursor-pointer"
-                    >
-                      {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                  {confirmPasswordInput && (
-                    <div className="text-[11px] font-bold">
-                      {confirmPasswordInput === newPasswordInput ? (
-                        <span className="text-emerald-600 flex items-center gap-1">
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Passwords match
-                        </span>
-                      ) : (
-                        <span className="text-rose-600">Passwords do not match</span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="pt-3 border-t border-slate-100 flex items-center justify-between flex-wrap gap-2">
-                <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
-                  <KeyRound className="w-3.5 h-3.5 text-amber-600" />
-                  <span>Updates immediately apply to the login page & database</span>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={isUpdatingCredentials}
-                  className="flex items-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white text-xs font-bold px-5 py-2.5 rounded-xl transition-all shadow-xs cursor-pointer active:scale-95 disabled:opacity-50"
-                >
-                  <Lock className="w-4 h-4" />
-                  <span>{isUpdatingCredentials ? 'Encrypting & Updating...' : 'Update & Encrypt HOD Credentials'}</span>
-                </button>
-              </div>
-            </form>
-          </div>
-
-          {/* CARD 2: HARDWARE BIOMETRIC SECURITY & SENSOR ENROLLMENT (Moved from header) */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-xs space-y-4">
-            <div className="flex items-start justify-between flex-wrap gap-2 pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center border border-sky-100">
-                  <Fingerprint className="w-5 h-5 stroke-[2.2]" />
-                </div>
-                <div>
-                  <h2 className="text-base font-bold text-slate-900">
-                    Hardware Biometric Security & Device Enrollment
-                  </h2>
-                  <p className="text-xs text-slate-500">
-                    Manage hardware-bound biometric authentication (Touch ID / Windows Hello) for passwordless unlock
-                  </p>
-                </div>
-              </div>
-
-              <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${
-                isHodBiometricEnrolled
-                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                  : 'bg-amber-50 text-amber-800 border-amber-200'
-              }`}>
-                <span className={`w-2 h-2 rounded-full ${isHodBiometricEnrolled ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`} />
-                {isHodBiometricEnrolled ? 'HOD Fingerprint Active' : 'Fingerprint Not Enrolled'}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
-                <div>
-                  <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Detected Device Sensor</div>
-                  <div className="text-xs font-bold text-slate-800 mt-0.5">{biometricHardware}</div>
-                </div>
-                <Cpu className="w-5 h-5 text-slate-400" />
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
-                <div>
-                  <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Enrolled Biometric Profiles</div>
-                  <div className="text-xs font-bold text-slate-800 mt-0.5">
-                    {enrolledBiometricsCount} Registered Profile{enrolledBiometricsCount !== 1 ? 's' : ''} on this Device
-                  </div>
-                </div>
-                <Users className="w-5 h-5 text-slate-400" />
-              </div>
-            </div>
-
-            <div className="pt-2 flex items-center justify-between flex-wrap gap-2">
-              <div className="text-[11px] text-slate-500">
-                Biometric keys are hardware-bound on this browser via WebAuthn/FIDO2.
-              </div>
-
-              <div className="flex items-center gap-2">
-                {isHodBiometricEnrolled && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 max-w-xl">
                   <button
                     type="button"
                     onClick={() => {
-                      biometricService.removeCredential(settings.hodName || 'dyp');
-                      biometricService.removeCredential('dyp');
-                      biometricService.removeCredential('hod');
-                      setBiometricTick(prev => prev + 1);
+                      setCredentialTarget('both');
+                      setCredentialError('');
                     }}
-                    className="px-3 py-2 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition-all cursor-pointer"
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer text-center ${
+                      credentialTarget === 'both'
+                        ? 'bg-amber-500 text-slate-950 border-amber-600 font-extrabold shadow-2xs'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
                   >
-                    Remove HOD Fingerprint
+                    Update Both Username & Password
                   </button>
-                )}
 
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCredentialTarget('username_only');
+                      setCredentialError('');
+                    }}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer text-center ${
+                      credentialTarget === 'username_only'
+                        ? 'bg-amber-500 text-slate-950 border-amber-600 font-extrabold shadow-2xs'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    Change Username Only
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCredentialTarget('password_only');
+                      setCredentialError('');
+                    }}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer text-center ${
+                      credentialTarget === 'password_only'
+                        ? 'bg-amber-500 text-slate-950 border-amber-600 font-extrabold shadow-2xs'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    Change Password Only
+                  </button>
+                </div>
+              </div>
+
+              <form onSubmit={handleUpdateHodCredentials} className="space-y-4 pt-1">
+                {/* STEP 1: Mandatory Current Password for Identity Authorization */}
+                <div className="p-4 bg-slate-50/90 rounded-2xl border border-slate-200 space-y-2 max-w-2xl">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                      <Lock className="w-3.5 h-3.5 text-slate-600" />
+                      <span>Current HOD Password <span className="text-rose-500">* (Identity Verification)</span></span>
+                    </label>
+                    <span className="text-[10px] text-slate-500 font-medium">Required for authorization</span>
+                  </div>
+
+                  <div className="relative flex items-center">
+                    <input
+                      type={showCurrentPassword ? 'text' : 'password'}
+                      value={currentPasswordInput}
+                      onChange={(e) => setCurrentPasswordInput(e.target.value)}
+                      placeholder="Enter current HOD password (e.g. dyp123)"
+                      className="w-full bg-white border border-slate-300 rounded-xl pl-3.5 pr-10 py-2.5 text-xs sm:text-sm font-mono text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-amber-500/30"
+                      required
+                      autoComplete="current-password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                      className="absolute right-3 text-slate-400 hover:text-slate-600 cursor-pointer p-1"
+                    >
+                      {showCurrentPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* STEP 2: Target Credential Fields */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl pt-1">
+                  
+                  {/* Field: New HOD Username (shown if updating username or both) */}
+                  {(credentialTarget === 'both' || credentialTarget === 'username_only') && (
+                    <div className="space-y-1.5 sm:col-span-2">
+                      <div className="flex items-center justify-between">
+                        <label className="block text-xs font-bold text-slate-700">
+                          New HOD Login Username <span className="text-rose-500">*</span>
+                        </label>
+                        <span className="text-[11px] font-mono text-slate-500">
+                          Current Login ID: <strong className="text-amber-700 font-bold">{settings.hodUsername || 'dyp'}</strong>
+                        </span>
+                      </div>
+                      <input
+                        type="text"
+                        value={newUsernameInput}
+                        onChange={(e) => setNewUsernameInput(e.target.value)}
+                        placeholder="Enter new HOD login username (e.g. dyp or hod_admin)"
+                        className="w-full bg-slate-50 border border-slate-300 rounded-2xl px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-amber-500/30"
+                        required
+                        autoComplete="username"
+                      />
+                      <p className="text-[10px] text-slate-500">
+                        This is the username required at the login screen (distinct from HOD display name "{settings.hodName || 'Prof. Prashant Kathole'}").
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Field: New HOD Password & Strength Meter (shown if updating password or both) */}
+                  {(credentialTarget === 'both' || credentialTarget === 'password_only') && (
+                    <>
+                      <div className="space-y-1.5 sm:col-span-2">
+                        <label className="block text-xs font-bold text-slate-700">
+                          New HOD Password <span className="text-rose-500">*</span>
+                        </label>
+                        <div className="relative flex items-center">
+                          <input
+                            type={showNewPassword ? 'text' : 'password'}
+                            value={newPasswordInput}
+                            onChange={(e) => setNewPasswordInput(e.target.value)}
+                            placeholder="Enter new strong password (min 6 chars)"
+                            className="w-full bg-slate-50 border border-slate-300 rounded-2xl pl-3.5 pr-10 py-2.5 text-xs sm:text-sm font-mono text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-amber-500/30"
+                            required
+                            autoComplete="new-password"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowNewPassword(!showNewPassword)}
+                            className="absolute right-3 text-slate-400 hover:text-slate-600 cursor-pointer p-1"
+                          >
+                            {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+
+                        {/* Interactive Password Strength Indicator */}
+                        {newPasswordInput && (
+                          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5 animate-fadeIn">
+                            <div className="flex items-center justify-between text-[11px]">
+                              <span className="font-bold text-slate-600">Password Strength:</span>
+                              <span className={`font-extrabold ${passwordStrength.color}`}>
+                                {passwordStrength.label}
+                              </span>
+                            </div>
+                            <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden">
+                              <div 
+                                className={`h-full transition-all duration-300 ${passwordStrength.bgColor}`}
+                                style={{ width: `${Math.max(15, (passwordStrength.score / 4) * 100)}%` }}
+                              />
+                            </div>
+                            {passwordStrength.suggestions.length > 0 && (
+                              <p className="text-[10.5px] text-slate-500">
+                                Tip: {passwordStrength.suggestions.join(', ')}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Field: Confirm New Password */}
+                      <div className="space-y-1.5 sm:col-span-2">
+                        <div className="flex items-center justify-between">
+                          <label className="block text-xs font-bold text-slate-700">
+                            Confirm New Password <span className="text-rose-500">*</span>
+                          </label>
+                          {newPasswordInput && confirmPasswordInput && (
+                            <span className={`text-[10px] font-bold flex items-center gap-1 ${
+                              newPasswordInput === confirmPasswordInput ? 'text-emerald-600' : 'text-rose-500'
+                            }`}>
+                              {newPasswordInput === confirmPasswordInput ? '✓ Passwords Match' : '✗ Does not match'}
+                            </span>
+                          )}
+                        </div>
+                        <div className="relative flex items-center">
+                          <input
+                            type={showConfirmPassword ? 'text' : 'password'}
+                            value={confirmPasswordInput}
+                            onChange={(e) => setConfirmPasswordInput(e.target.value)}
+                            placeholder="Re-enter new password to verify"
+                            className="w-full bg-slate-50 border border-slate-300 rounded-2xl pl-3.5 pr-10 py-2.5 text-xs sm:text-sm font-mono text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-amber-500/30"
+                            required
+                            autoComplete="new-password"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                            className="absolute right-3 text-slate-400 hover:text-slate-600 cursor-pointer p-1"
+                          >
+                            {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                </div>
+
+                {/* Security Guarantee Notice */}
+                <div className="p-3 bg-amber-50/60 rounded-2xl border border-amber-200/80 text-[11px] text-amber-900 flex items-start gap-2 max-w-2xl">
+                  <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <p className="font-extrabold">End-to-End Credential Encryption & Integrity</p>
+                    <p className="text-amber-800 leading-relaxed">
+                      Passwords are automatically hashed using 256-bit SHA-256 cryptographic standards before persistence. No plain-text passwords are leaked in network logs, browser history, or system intercepts.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Submit Action with Tactile 3D Depth */}
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    disabled={isUpdatingCredentials}
+                    className="btn-depth-amber px-6 py-3 rounded-2xl text-slate-950 text-xs font-black cursor-pointer shadow-md flex items-center gap-2 select-none active:scale-95 transition-all disabled:opacity-50"
+                  >
+                    <Save className="w-4 h-4 text-slate-950 stroke-[2.4]" />
+                    <span>{isUpdatingCredentials ? 'Encrypting & Saving...' : 'Save HOD Credentials'}</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* CARD 2: CAMPUS & DEPARTMENT INFORMATION & HOD PROFILE */}
+            <div className="bg-white rounded-3xl border border-slate-200/90 p-5 sm:p-6 shadow-sm space-y-5">
+              <div className="flex items-center gap-2.5 pb-3 border-b border-slate-100">
+                <div className="w-10 h-10 rounded-2xl bg-slate-100 text-slate-700 flex items-center justify-center border border-slate-200">
+                  <Settings className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">Campus Identity & HOD Profile</h2>
+                  <p className="text-xs text-slate-500">Configure HOD full name, college name, department title, and minimum attendance %</p>
+                </div>
+              </div>
+
+              {settingsSavedMsg && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-800 font-semibold flex items-center gap-2 animate-fadeIn">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span>Campus settings saved successfully!</span>
+                </div>
+              )}
+
+              <form onSubmit={handleSaveSettings} className="space-y-4 max-w-2xl">
+                {/* HOD Full Human Name */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-slate-700">
+                      Head of Department (HOD) Name / Title
+                    </label>
+                    <span className="text-[10px] text-slate-500 font-medium">
+                      Official display name
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    value={hodName}
+                    onChange={(e) => setHodName(e.target.value)}
+                    placeholder="e.g. Prof. Prashant Kathole"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-2xl px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-slate-900"
+                  />
+                  <p className="text-[10px] text-slate-500">
+                    Official Head of Department name displayed on reports, header badges, and notices.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-700">College / Campus Name</label>
+                  <input
+                    type="text"
+                    value={collegeName}
+                    onChange={(e) => setCollegeName(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-2xl px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-slate-900"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-700">Department Name</label>
+                  <input
+                    type="text"
+                    value={deptName}
+                    onChange={(e) => setDeptName(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-2xl px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-slate-900"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-700">
+                    Defaulter Threshold (% Attendance Required)
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min={30}
+                      max={90}
+                      step={5}
+                      value={settings.defaulterThreshold || 50}
+                      onChange={(e) => onUpdateSettings({ ...settings, defaulterThreshold: Number(e.target.value) })}
+                      className="flex-1 accent-amber-500 cursor-pointer"
+                    />
+                    <span className="font-mono font-black text-sm text-slate-900 bg-slate-100 px-3 py-1 rounded-xl border border-slate-200">
+                      {settings.defaulterThreshold || 50}%
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 pt-2">
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 rounded-2xl bg-slate-900 hover:bg-slate-800 active:scale-95 text-white text-xs font-extrabold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Save className="w-4 h-4" />
+                    <span>Save Campus Settings</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowResetSettingsModal(true)}
+                    className="px-4 py-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all cursor-pointer"
+                  >
+                    Reset Defaults
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* CARD 3: CLOUD DATABASE SYNC & BIOMETRICS */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Cloud Sync Card */}
+              <div className="bg-white rounded-3xl border border-slate-200/90 p-5 shadow-sm space-y-3.5">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-2xl bg-sky-50 text-sky-600 flex items-center justify-center border border-sky-200">
+                    <Cloud className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">Cloud Database Sync</h3>
+                    <p className="text-[11px] text-slate-500">Real-time bi-directional persistence</p>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  All attendance sessions, timetable matrix, and student rosters are backed up to the live cloud database.
+                </p>
+                <button
+                  type="button"
+                  onClick={onForceSyncCloud}
+                  disabled={isCloudSyncing}
+                  className="w-full py-2.5 rounded-2xl bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Cloud className={`w-4 h-4 ${isCloudSyncing ? 'animate-pulse' : ''}`} />
+                  <span>{isCloudSyncing ? 'Syncing to Cloud...' : 'Force Sync to Cloud Database'}</span>
+                </button>
+              </div>
+
+              {/* Hardware Biometric Auth Card */}
+              <div className="bg-white rounded-3xl border border-slate-200/90 p-5 shadow-sm space-y-3.5">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-200">
+                    <Fingerprint className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">Hardware Biometric Authentication</h3>
+                    <p className="text-[11px] text-slate-500">Touch ID / Windows Hello WebAuthn</p>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Status: <strong className={isHodBiometricEnrolled ? 'text-emerald-700' : 'text-slate-600'}>
+                    {isHodBiometricEnrolled ? '✓ Biometrics Active for HOD' : 'Not yet enrolled'}
+                  </strong>
+                </p>
                 {onOpenBiometrics && (
                   <button
                     type="button"
                     onClick={onOpenBiometrics}
-                    className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-xl transition-all shadow-xs cursor-pointer active:scale-95"
+                    className="w-full py-2.5 rounded-2xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                   >
-                    <Fingerprint className="w-4 h-4" />
-                    <span>{isHodBiometricEnrolled ? 'Re-enroll / Update Fingerprint' : 'Enroll HOD Fingerprint Now'}</span>
+                    <Fingerprint className="w-4 h-4 text-emerald-600" />
+                    <span>{isHodBiometricEnrolled ? 'Manage Biometric Key' : 'Enroll Fingerprint / Face ID'}</span>
                   </button>
                 )}
               </div>
             </div>
+
           </div>
+        )}
 
-          {/* CARD 3: CAMPUS IDENTITY & GENERAL CONFIGURATIONS */}
-          <form onSubmit={handleSaveSettings} className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-xs space-y-5">
-            <div>
-              <h2 className="text-base font-bold text-slate-900">Campus Identity & Academic Department</h2>
-              <p className="text-xs text-slate-500">
-                Configure institution name, academic department title, and defaulter attendance thresholds
-              </p>
-            </div>
+      </div>
 
-            {settingsSavedMsg && (
-              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 font-semibold flex items-center gap-2">
-                <Check className="w-4 h-4 text-emerald-600" />
-                <span>Campus configurations successfully updated and synchronized to cloud!</span>
-              </div>
-            )}
+      {/* ========================================================================= */}
+      {/* MODALS */}
+      {/* ========================================================================= */}
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* College Name */}
-              <div className="space-y-1.5 sm:col-span-2">
-                <label htmlFor="settings-college-name" className="block text-xs font-bold text-slate-700">
-                  College / Institution Name
-                </label>
-                <input
-                  id="settings-college-name"
-                  type="text"
-                  value={collegeName}
-                  onChange={(e) => setCollegeName(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-sm font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-slate-900 uppercase"
-                  required
-                />
-              </div>
-
-              {/* Department Name */}
-              <div className="space-y-1.5">
-                <label htmlFor="settings-dept-name" className="block text-xs font-bold text-slate-700">
-                  Department Name
-                </label>
-                <input
-                  id="settings-dept-name"
-                  type="text"
-                  value={deptName}
-                  onChange={(e) => setDeptName(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-slate-900"
-                  required
-                />
-              </div>
-
-              {/* Defaulter Threshold % */}
-              <div className="space-y-1.5">
-                <label htmlFor="settings-defaulter-threshold" className="block text-xs font-bold text-slate-700">
-                  Default Defaulter Criteria (%)
-                </label>
-                <input
-                  id="settings-defaulter-threshold"
-                  type="number"
-                  min={20}
-                  max={90}
-                  value={settings.defaulterThreshold}
-                  onChange={(e) => onUpdateSettings({ ...settings, defaulterThreshold: Number(e.target.value) })}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-sm font-mono text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-slate-900"
-                />
-              </div>
-            </div>
-
-            <div className="pt-3 border-t border-slate-100 flex items-center justify-between flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setShowResetSettingsModal(true)}
-                className="flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-3.5 py-2 rounded-xl transition-all cursor-pointer"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Reset Settings to Default</span>
-              </button>
-
-              <button
-                id="save-campus-settings-button"
-                type="submit"
-                className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-5 py-2.5 rounded-xl transition-all shadow-xs cursor-pointer"
-              >
-                <Save className="w-4 h-4" />
-                <span>Save & Sync Campus Configurations</span>
-              </button>
-            </div>
-          </form>
-
-          {/* Danger Zone Card */}
-          <div className="bg-rose-50/60 border border-rose-200 rounded-2xl p-5 space-y-4">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-rose-600" />
-              <h3 className="text-sm font-bold text-rose-950">Administrative Actions & Danger Zone</h3>
-            </div>
-            <p className="text-xs text-rose-800 leading-relaxed">
-              These administrative operations allow HOD to wipe student records or restore the campus database back to fresh default states.
-            </p>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-              <button
-                type="button"
-                onClick={() => setShowResetSettingsModal(true)}
-                className="flex flex-col items-start p-3.5 rounded-xl bg-white border border-slate-200 hover:border-slate-300 text-left transition-all cursor-pointer shadow-2xs"
-              >
-                <span className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
-                  <RotateCcw className="w-3.5 h-3.5 text-slate-600" />
-                  Reset Settings Only
-                </span>
-                <span className="text-[11px] text-slate-500 mt-1">
-                  Reverts college title and HOD passcode to default D.Y.PATIL settings.
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowDeleteAllStudentsModal(true)}
-                className="flex flex-col items-start p-3.5 rounded-xl bg-white border border-rose-200 hover:border-rose-300 text-left transition-all cursor-pointer shadow-2xs"
-              >
-                <span className="font-bold text-xs text-rose-700 flex items-center gap-1.5">
-                  <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-                  Delete All Students
-                </span>
-                <span className="text-[11px] text-rose-600 mt-1">
-                  Permanently clears student roster across divisions or campus.
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowResetCampusModal(true)}
-                className="flex flex-col items-start p-3.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-left transition-all cursor-pointer shadow-xs"
-              >
-                <span className="font-bold text-xs flex items-center gap-1.5">
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  Reset Entire Campus
-                </span>
-                <span className="text-[11px] text-rose-100 mt-1">
-                  Wipes and restores default classes, timetable, and campus state.
-                </span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* TAB 6: DATABASE & SUPABASE MIGRATION CENTER */}
-      {activeTab === 'database' && (
-        <div className="space-y-6">
-          
-          {/* Provider Selector Switcher */}
-          <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                Database Engine Selection
-              </div>
-              <h3 className="text-base font-bold text-slate-900">
-                Active Campus Database Provider
-              </h3>
-              <p className="text-xs text-slate-500">
-                Switch between Supabase PostgreSQL and Google Cloud Firebase with 0 data loss.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2 p-1 bg-slate-100 rounded-xl border border-slate-200">
-              <button
-                type="button"
-                onClick={() => {
-                  dbService.setProvider('supabase');
-                  setActiveProvider('supabase');
-                }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  activeProvider === 'supabase'
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <Database className="w-3.5 h-3.5" />
-                <span>Supabase PostgreSQL</span>
-                {activeProvider === 'supabase' && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  dbService.setProvider('firebase');
-                  setActiveProvider('firebase');
-                }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  activeProvider === 'firebase'
-                    ? 'bg-slate-900 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <Server className="w-3.5 h-3.5" />
-                <span>Firebase Firestore</span>
-                {activeProvider === 'firebase' && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                )}
-              </button>
-            </div>
-          </div>
-
-          {/* Active Database Banner */}
-          {activeProvider === 'supabase' ? (
-            <div className="bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 rounded-2xl p-5 sm:p-6 text-white border border-emerald-900/50 shadow-md space-y-5">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-2">
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold uppercase tracking-wider">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                      Active Database Provider
-                    </span>
-                    <span className="text-[10px] text-emerald-300/80 font-mono">
-                      Supabase PostgreSQL Client Connected
-                    </span>
-                  </div>
-                  <h2 className="text-lg sm:text-xl font-extrabold flex items-center gap-2">
-                    <Database className="w-5 h-5 text-emerald-400" />
-                    <span>Supabase PostgreSQL Database</span>
-                  </h2>
-                  <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
-                    Student rosters, attendance sessions, timetable schedules, classroom mappings, and campus settings are actively configured to store directly in your Supabase project.
-                  </p>
-                </div>
-
-                {/* Push All Data to Supabase Action */}
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      setIsPushingToSupabase(true);
-                      setSupabaseSyncMsg(null);
-                      try {
-                        let currentSessions = sessions;
-                        if (!currentSessions || currentSessions.length === 0) {
-                          try {
-                            const stored = localStorage.getItem('dypatil_sessions_v1');
-                            if (stored) currentSessions = JSON.parse(stored);
-                          } catch (_) {}
-                        }
-
-                        await dbService.supabase.saveEntireCampusState({
-                          settings,
-                          classes,
-                          students,
-                          teachers,
-                          classrooms,
-                          timetable,
-                          sessions: currentSessions
-                        });
-
-                        setSupabaseSyncMsg({
-                          text: `Successfully synced all ${students.length} students, ${classes.length} classes, and attendance records to Supabase!`,
-                          type: 'success'
-                        });
-                      } catch (err: any) {
-                        if (err?.message?.includes('tables have not been created') || err?.message?.includes('schema cache')) {
-                          setSupabaseSyncMsg({
-                            text: 'Supabase connected! Please copy and execute the SQL Schema below in your Supabase SQL Editor to initialize all tables.',
-                            type: 'warning'
-                          });
-                        } else {
-                          setSupabaseSyncMsg({
-                            text: `Sync notice: ${err?.message || 'Check connection'}`,
-                            type: 'warning'
-                          });
-                        }
-                      } finally {
-                        setIsPushingToSupabase(false);
-                      }
-                    }}
-                    disabled={isPushingToSupabase}
-                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-slate-950 text-xs font-bold transition-all shadow-sm cursor-pointer disabled:opacity-50"
-                  >
-                    <Cloud className={`w-4 h-4 ${isPushingToSupabase ? 'animate-pulse' : ''}`} />
-                    <span>{isPushingToSupabase ? 'Storing to Supabase...' : 'Push All Data to Supabase Now'}</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Supabase Notification Alert */}
-              {supabaseSyncMsg && (
-                <div className={`p-3.5 rounded-xl border text-xs flex items-start gap-2.5 ${
-                  supabaseSyncMsg.type === 'success'
-                    ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-200'
-                    : supabaseSyncMsg.type === 'warning'
-                    ? 'bg-amber-500/20 border-amber-500/40 text-amber-200'
-                    : 'bg-rose-500/20 border-rose-500/40 text-rose-200'
-                }`}>
-                  {supabaseSyncMsg.type === 'success' ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                  ) : (
-                    <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                  )}
-                  <div className="space-y-1">
-                    <div className="font-bold">{supabaseSyncMsg.type === 'success' ? 'Synchronized' : 'Notice'}</div>
-                    <p className="text-[11px] leading-relaxed">{supabaseSyncMsg.text}</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Supabase Credentials Grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-3 border-t border-slate-800">
-                <div className="bg-slate-900/80 rounded-xl p-3 border border-slate-800">
-                  <span className="text-[10px] font-bold uppercase text-slate-400 block mb-0.5">Project Name</span>
-                  <span className="text-xs font-semibold text-white truncate block" title="attendance">
-                    attendance
-                  </span>
-                </div>
-                <div className="bg-slate-900/80 rounded-xl p-3 border border-slate-800">
-                  <span className="text-[10px] font-bold uppercase text-slate-400 block mb-0.5">Supabase Project ID</span>
-                  <span className="text-xs font-mono font-bold text-emerald-300 truncate block">
-                    lascgvyktowhgrfcnqbp
-                  </span>
-                </div>
-                <div className="bg-slate-900/80 rounded-xl p-3 border border-slate-800">
-                  <span className="text-[10px] font-bold uppercase text-slate-400 block mb-0.5">Endpoint URL</span>
-                  <span className="text-xs font-mono text-sky-300 truncate block" title="https://lascgvyktowhgrfcnqbp.supabase.co">
-                    https://lascgvyktowhgrfcnqbp...
-                  </span>
-                </div>
-                <div className="bg-slate-900/80 rounded-xl p-3 border border-slate-800">
-                  <span className="text-[10px] font-bold uppercase text-slate-400 block mb-0.5">Public Key</span>
-                  <span className="text-xs font-mono text-slate-400 truncate block" title="sb_publishable_TnPeA9j7P_JkSTa4VpEQRw_xYI3_59R">
-                    sb_publishable_TnPe...
-                  </span>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 rounded-2xl p-5 sm:p-6 text-white border border-slate-700 shadow-md">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-2">
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold uppercase tracking-wider">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                      Active Primary Provider
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-mono">
-                      Firestore Rules Deployed
-                    </span>
-                  </div>
-                  <h2 className="text-lg sm:text-xl font-extrabold flex items-center gap-2">
-                    <Database className="w-5 h-5 text-emerald-400" />
-                    <span>Google Cloud Firebase Firestore</span>
-                  </h2>
-                  <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
-                    All campus attendance records, student rosters, timetable lectures, and institutional settings are synchronized with Google Cloud Firestore.
-                  </p>
-                </div>
-
-                {/* Force Sync Action */}
-                <div className="flex items-center gap-2 shrink-0">
-                  {onForceSyncCloud && (
-                    <button
-                      type="button"
-                      onClick={onForceSyncCloud}
-                      disabled={isCloudSyncing}
-                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-slate-950 text-xs font-bold transition-all shadow-sm cursor-pointer disabled:opacity-50"
-                    >
-                      <Cloud className={`w-4 h-4 ${isCloudSyncing ? 'animate-pulse' : ''}`} />
-                      <span>{isCloudSyncing ? 'Synchronizing...' : 'Force Push to Cloud'}</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Connection Credentials Grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-5 pt-4 border-t border-slate-700/80">
-                <div className="bg-slate-800/60 rounded-xl p-3 border border-slate-700">
-                  <span className="text-[10px] font-bold uppercase text-slate-400 block mb-0.5">Firebase Project ID</span>
-                  <span className="text-xs font-mono font-bold text-emerald-300 truncate block">robotic-quanta-2mln4</span>
-                </div>
-                <div className="bg-slate-800/60 rounded-xl p-3 border border-slate-700">
-                  <span className="text-[10px] font-bold uppercase text-slate-400 block mb-0.5">Named Firestore DB</span>
-                  <span className="text-xs font-mono font-bold text-sky-300 truncate block" title="ai-studio-dypatiltechnical-2db2d2f0-88f1-4cba-9c2f-dba9f6aab366">
-                    ai-studio-dypatiltechnical...
-                  </span>
-                </div>
-                <div className="bg-slate-800/60 rounded-xl p-3 border border-slate-700">
-                  <span className="text-[10px] font-bold uppercase text-slate-400 block mb-0.5">Current Scope</span>
-                  <span className="text-xs font-semibold text-amber-300 truncate block">
-                    ECE - Div A (Single Division)
-                  </span>
-                </div>
-              </div>
-
-              {dbService.isQuotaExhausted && (
-                <div className="mt-4 p-3.5 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-200 text-xs flex items-start gap-2.5">
-                  <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                  <div className="space-y-1">
-                    <div className="font-bold text-amber-300">Firebase Free Daily Write Limit Reached</div>
-                    <p className="text-[11px] text-amber-200 leading-relaxed">
-                      Google Cloud Firestore free-tier daily write quota has been reached. Offline-first local storage is actively preserving all attendance sessions, students, and settings in your browser with zero data loss. Cloud synchronization will resume once the daily quota resets, or you can migrate to Supabase below.
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Academic Division Scope Notice */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center shrink-0">
-                <School className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-slate-900">Current Academic Division</h3>
-                <p className="text-xs text-slate-500">
-                  Per configuration, the system is currently scoped to <strong className="text-slate-800 font-semibold">Electronics and Computer Engineering - Div A</strong>.
-                </p>
-              </div>
-            </div>
-            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold border border-slate-200 shrink-0">
-              <Users className="w-3.5 h-3.5 text-slate-500" />
-              <span>{students.length} Students Enrolled</span>
-            </div>
-          </div>
-
-          {/* Supabase Schema & Database Operations Studio */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-xs space-y-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
-              <div>
-                <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 text-[10px] font-bold uppercase mb-1 border border-emerald-200">
-                  <ArrowRightLeft className="w-3 h-3 text-emerald-600" />
-                  Supabase PostgreSQL Connected
-                </div>
-                <h3 className="text-base font-bold text-slate-900">
-                  Supabase Table Initialization & Schema Center
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Execute this SQL in your Supabase project to create all tables (students, classes, timetable, attendance) with Row Level Security enabled.
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <a
-                  href="https://supabase.com/dashboard/project/lascgvyktowhgrfcnqbp/sql/new"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  <span>Open Supabase SQL Editor</span>
-                </a>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    const schema = dbService.getSupabaseSchema();
-                    navigator.clipboard.writeText(schema);
-                    setCopiedSchema(true);
-                    setTimeout(() => setCopiedSchema(false), 3000);
-                  }}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
-                >
-                  {copiedSchema ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedSchema ? 'SQL Copied!' : 'Copy Supabase SQL'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    const dump = {
-                      timestamp: new Date().toISOString(),
-                      settings,
-                      classes,
-                      students,
-                      teachers,
-                      classrooms,
-                      timetable,
-                      sessions
-                    };
-                    const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
-                    const url = URL.createObjectURL(blob);
-                    const link = document.createElement('a');
-                    link.href = url;
-                    link.download = `DYPATIL_Campus_Backup_${new Date().toISOString().slice(0, 10)}.json`;
-                    link.click();
-                    URL.revokeObjectURL(url);
-                  }}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all border border-slate-200 cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Download Backup JSON</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Quick 2-Step Guide */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-                <div className="w-6 h-6 rounded-full bg-slate-900 text-white text-[11px] font-bold flex items-center justify-center mb-1.5">
-                  1
-                </div>
-                <h4 className="text-xs font-bold text-slate-900">Run SQL in Supabase</h4>
-                <p className="text-[11px] text-slate-500 leading-relaxed">
-                  Click <strong>Copy Supabase SQL</strong> (or open the <strong>Supabase SQL Editor</strong> link), paste the script into the query editor, and click <strong>Run</strong>.
-                </p>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-                <div className="w-6 h-6 rounded-full bg-emerald-600 text-white text-[11px] font-bold flex items-center justify-center mb-1.5">
-                  2
-                </div>
-                <h4 className="text-xs font-bold text-slate-900">Automatic Storage & Sync</h4>
-                <p className="text-[11px] text-slate-500 leading-relaxed">
-                  Once tables exist, click <strong>Push All Data to Supabase Now</strong> above. All student records, attendance marks, timetables, and faculty will be safely stored in PostgreSQL!
-                </p>
-              </div>
-            </div>
-
-            {/* Schema Preview Box */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                  <Code className="w-4 h-4 text-slate-500" />
-                  PostgreSQL Table DDL (Ready to Run in Supabase)
-                </span>
-                <span className="text-[11px] text-slate-400">
-                  Tables: campus_students, campus_classes, campus_sessions, campus_timetable, campus_state
-                </span>
-              </div>
-              <pre className="bg-slate-900 text-slate-200 p-4 rounded-xl text-[11px] font-mono overflow-x-auto max-h-56 overflow-y-auto border border-slate-800">
-                {dbService.getSupabaseSchema()}
-              </pre>
-            </div>
-          </div>
-
-        </div>
-      )}
-
-      {/* MODAL 1: RESET CAMPUS SYSTEM CONFIRMATION (In-App Modal) */}
-      {showResetCampusModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5">
-          <div className="bg-white rounded-2xl max-w-md w-full border border-slate-200 shadow-2xl overflow-hidden animate-fadeIn">
-            <div className="p-4 bg-rose-700 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="w-5 h-5 text-amber-300" />
-                <h3 className="text-sm font-bold">Confirm Campus Database Reset</h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowResetCampusModal(false)}
-                className="text-rose-200 hover:text-white cursor-pointer"
-              >
-                &times;
-              </button>
-            </div>
-
-            <div className="p-5 space-y-4">
-              <p className="text-xs text-slate-700 leading-relaxed">
-                This will reset all campus data back to the default <strong className="text-slate-900">D.Y.PATIL TECHNICAL CAMPUS</strong> state:
-              </p>
-
-              <ul className="text-xs text-slate-600 space-y-1 list-disc pl-4 bg-slate-50 p-3 rounded-xl border border-slate-200">
-                <li>Restores default classes & divisions (TE-A, TE-B, BE-A)</li>
-                <li>Restores default student rosters & demo attendance</li>
-                <li>Restores default faculty codes (TEACH101, etc.)</li>
-                <li>Restores official weekly timetable & classrooms</li>
-                <li>Restores default HOD passcode and institution settings</li>
-              </ul>
-
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setShowResetCampusModal(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowResetCampusModal(false);
-                    onResetAllData();
-                  }}
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white cursor-pointer shadow-xs"
-                >
-                  Yes, Reset Everything
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 2: RESET SETTINGS ONLY CONFIRMATION */}
-      {showResetSettingsModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5">
-          <div className="bg-white rounded-2xl max-w-md w-full border border-slate-200 shadow-2xl overflow-hidden animate-fadeIn">
-            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <RotateCcw className="w-4 h-4 text-amber-400" />
-                <h3 className="text-sm font-bold">Reset Campus Settings to Default</h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowResetSettingsModal(false)}
-                className="text-slate-400 hover:text-white cursor-pointer"
-              >
-                &times;
-              </button>
-            </div>
-
-            <div className="p-5 space-y-4">
-              <p className="text-xs text-slate-700 leading-relaxed">
-                Reset institution name to <strong className="text-slate-900">D.Y.PATIL TECHNICAL CAMPUS</strong> and HOD passcode to default?
-              </p>
-
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setShowResetSettingsModal(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowResetSettingsModal(false);
-                    onResetSettings();
-                  }}
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white cursor-pointer"
-                >
-                  Confirm Reset Settings
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 3: DELETE ALL STUDENTS CONFIRMATION */}
-      {showDeleteAllStudentsModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5">
-          <div className="bg-white rounded-2xl max-w-md w-full border border-slate-200 shadow-2xl overflow-hidden animate-fadeIn">
-            <div className="p-4 bg-rose-700 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Trash2 className="w-5 h-5 text-rose-200" />
-                <h3 className="text-sm font-bold">Delete All Students</h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowDeleteAllStudentsModal(false)}
-                className="text-rose-200 hover:text-white cursor-pointer"
-              >
-                &times;
-              </button>
-            </div>
-
-            <div className="p-5 space-y-4">
-              <p className="text-xs text-slate-700 leading-relaxed">
-                Choose the scope of student deletion below:
-              </p>
-
-              <div className="space-y-2">
-                {selectedStudentClassId !== 'all' && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowDeleteAllStudentsModal(false);
-                      onDeleteAllStudents('current_class', selectedStudentClassId);
-                    }}
-                    className="w-full text-left p-3.5 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 transition-all cursor-pointer"
-                  >
-                    <div className="font-bold text-xs text-rose-900">
-                      Delete all in currently selected class ({classes.find(c => c.id === selectedStudentClassId)?.name})
-                    </div>
-                    <p className="text-[11px] text-rose-700 mt-0.5">
-                      Clears student enrollment for this class only.
-                    </p>
-                  </button>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowDeleteAllStudentsModal(false);
-                    onDeleteAllStudents('all_campus');
-                  }}
-                  className="w-full text-left p-3.5 rounded-xl border border-red-300 bg-red-100/50 hover:bg-red-100 transition-all cursor-pointer"
-                >
-                  <div className="font-bold text-xs text-red-950">
-                    Delete All Students Across Entire Campus ({students.length} total)
-                  </div>
-                  <p className="text-[11px] text-red-800 mt-0.5">
-                    Wipes all student rosters and enrollment records in all classes.
-                  </p>
-                </button>
-              </div>
-
-              <div className="flex justify-end pt-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setShowDeleteAllStudentsModal(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 4: DELETE INDIVIDUAL STUDENT CONFIRMATION */}
-      {studentToDelete && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5">
-          <div className="bg-white rounded-2xl max-w-md w-full border border-slate-200 shadow-2xl overflow-hidden animate-fadeIn">
-            <div className="p-4 bg-rose-600 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Trash2 className="w-4 h-4 text-rose-200" />
-                <h3 className="text-sm font-bold">Delete Student Record</h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setStudentToDelete(null)}
-                className="text-rose-200 hover:text-white cursor-pointer"
-              >
-                &times;
-              </button>
-            </div>
-
-            <div className="p-5 space-y-4">
-              <p className="text-xs text-slate-700 leading-relaxed">
-                Are you sure you want to permanently delete <strong className="text-slate-900">{studentToDelete.name}</strong> (Roll #{studentToDelete.rollNo}) from the campus records?
-              </p>
-
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setStudentToDelete(null)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onDeleteStudent(studentToDelete.id);
-                    setStudentToDelete(null);
-                  }}
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white cursor-pointer shadow-xs"
-                >
-                  Confirm Delete
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 5: ENROLL / EDIT STUDENT IN HOD SYSTEM */}
+      {/* MODAL: ADD / EDIT STUDENT */}
       {showAddStudentModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5">
-          <div className="bg-white rounded-2xl max-w-lg w-full border border-slate-200 shadow-2xl overflow-hidden animate-fadeIn">
-            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <GraduationCap className="w-4 h-4 text-amber-400" />
-                <h3 className="text-sm font-bold">
-                  {editingStudent ? 'Edit Student Details' : 'Enroll Student into Campus Database'}
-                </h3>
-              </div>
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white rounded-3xl p-6 sm:p-7 max-w-lg w-full shadow-2xl border border-slate-200 space-y-5 animate-scaleUp">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <h3 className="text-base font-extrabold text-slate-900">
+                {editingStudent ? 'Edit Student Details' : 'Enroll New Student'}
+              </h3>
               <button
                 type="button"
                 onClick={() => setShowAddStudentModal(false)}
-                className="text-slate-400 hover:text-white cursor-pointer"
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
               >
-                &times;
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveStudent} className="p-5 space-y-4">
-              <div className="grid grid-cols-2 gap-3">
+            <form onSubmit={handleSaveStudent} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700">Roll Number *</label>
+                  <label className="block text-xs font-bold text-slate-700">Roll No *</label>
                   <input
                     type="text"
                     value={newStudentRoll}
                     onChange={(e) => setNewStudentRoll(e.target.value)}
                     placeholder="e.g. 01"
-                    className="w-full border border-slate-300 rounded-xl p-2 text-xs font-mono font-bold"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-900"
                     required
                   />
                 </div>
+                <div className="sm:col-span-2 space-y-1">
+                  <label className="block text-xs font-bold text-slate-700">Full Name *</label>
+                  <input
+                    type="text"
+                    value={newStudentName}
+                    onChange={(e) => setNewStudentName(e.target.value)}
+                    placeholder="e.g. Rahul Sharma"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900"
+                    required
+                  />
+                </div>
+              </div>
 
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700">Gender</label>
+                  <label className="block text-xs font-bold text-slate-700">Gender</label>
                   <select
                     value={newStudentGender}
                     onChange={(e) => setNewStudentGender(e.target.value as any)}
-                    className="w-full border border-slate-300 rounded-xl p-2 text-xs"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900"
                   >
                     <option value="M">Male</option>
                     <option value="F">Female</option>
                     <option value="Other">Other</option>
                   </select>
                 </div>
+                {!editingStudent && (
+                  <div className="space-y-1">
+                    <label className="block text-xs font-bold text-slate-700">Target Class / Div</label>
+                    <select
+                      value={newStudentClassId}
+                      onChange={(e) => setNewStudentClassId(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900"
+                    >
+                      {classes.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
 
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700">Full Student Name *</label>
-                <input
-                  type="text"
-                  value={newStudentName}
-                  onChange={(e) => setNewStudentName(e.target.value)}
-                  placeholder="e.g. Aarav Sharma"
-                  className="w-full border border-slate-300 rounded-xl p-2 text-xs font-semibold"
-                  required
-                />
-              </div>
-
-              {!editingStudent && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700">Assign to Class / Division</label>
-                  <select
-                    value={newStudentClassId}
-                    onChange={(e) => setNewStudentClassId(e.target.value)}
-                    className="w-full border border-slate-300 rounded-xl p-2 text-xs font-semibold"
-                  >
-                    {classes.map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700">Parent Name</label>
+                  <label className="block text-xs font-bold text-slate-700">Parent Name</label>
                   <input
                     type="text"
                     value={newStudentParent}
                     onChange={(e) => setNewStudentParent(e.target.value)}
-                    placeholder="e.g. Ramesh Sharma"
-                    className="w-full border border-slate-300 rounded-xl p-2 text-xs"
+                    placeholder="Parent / Guardian"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700">Parent WhatsApp</label>
+                  <label className="block text-xs font-bold text-slate-700">Parent Phone (WhatsApp)</label>
                   <input
                     type="tel"
                     value={newStudentPhone}
                     onChange={(e) => setNewStudentPhone(e.target.value)}
-                    placeholder="+919876543210"
-                    className="w-full border border-slate-300 rounded-xl p-2 text-xs font-mono"
+                    placeholder="+91..."
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono text-slate-900"
                   />
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+              <div className="flex items-center justify-end gap-2.5 pt-3">
                 <button
                   type="button"
                   onClick={() => setShowAddStudentModal(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white cursor-pointer"
+                  className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shadow-md cursor-pointer"
                 >
                   {editingStudent ? 'Save Changes' : 'Enroll Student'}
                 </button>
@@ -2091,107 +2012,81 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
         </div>
       )}
 
-      {/* MODAL 6: ADD TEACHER */}
+      {/* MODAL: ADD TEACHER */}
       {showAddTeacherModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5">
-          <div className="bg-white rounded-2xl max-w-lg w-full border border-slate-200 shadow-2xl overflow-hidden animate-fadeIn">
-            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Users className="w-4 h-4 text-emerald-400" />
-                <h3 className="text-sm font-bold">Add Teacher & Generate Unique Code</h3>
-              </div>
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl border border-slate-200 space-y-4 animate-scaleUp">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <h3 className="text-base font-extrabold text-slate-900">Add New Faculty</h3>
               <button
                 type="button"
                 onClick={() => setShowAddTeacherModal(false)}
-                className="text-slate-400 hover:text-white cursor-pointer"
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
               >
-                &times;
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveNewTeacher} className="p-5 space-y-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700">Teacher Full Name</label>
+            <form onSubmit={handleSaveNewTeacher} className="space-y-3.5">
+              <div className="space-y-1">
+                <label className="block text-xs font-bold text-slate-700">Faculty Name *</label>
                 <input
                   type="text"
                   value={newTeacherName}
                   onChange={(e) => setNewTeacherName(e.target.value)}
-                  placeholder="e.g. Prof. Sandeep Kadam"
-                  className="w-full border border-slate-300 rounded-xl p-2 text-xs font-semibold"
+                  placeholder="Prof. Name"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900"
                   required
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-700">Unique Login Code</label>
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-slate-700">Unique Code *</label>
                   <input
                     type="text"
                     value={newTeacherCode}
-                    onChange={(e) => setNewTeacherCode(e.target.value.toUpperCase())}
-                    className="w-full border border-slate-300 rounded-xl p-2 text-xs font-mono font-bold uppercase text-emerald-800 bg-emerald-50"
+                    onChange={(e) => setNewTeacherCode(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-emerald-800 uppercase"
                     required
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-700">Passcode</label>
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-slate-700">Passcode *</label>
                   <input
                     type="text"
                     value={newTeacherPasscode}
                     onChange={(e) => setNewTeacherPasscode(e.target.value)}
-                    className="w-full border border-slate-300 rounded-xl p-2 text-xs font-mono font-semibold"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-900"
                     required
                   />
                 </div>
               </div>
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700">Respective Subjects (Comma separated)</label>
+              <div className="space-y-1">
+                <label className="block text-xs font-bold text-slate-700">Assigned Subjects (comma-separated)</label>
                 <input
                   type="text"
                   value={newTeacherSubjects}
                   onChange={(e) => setNewTeacherSubjects(e.target.value)}
-                  placeholder="e.g. Machine Learning, Cloud Computing"
-                  className="w-full border border-slate-300 rounded-xl p-2 text-xs"
-                  required
+                  placeholder="e.g. AI, Cloud Computing"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-700">Email Address</label>
-                  <input
-                    type="email"
-                    value={newTeacherEmail}
-                    onChange={(e) => setNewTeacherEmail(e.target.value)}
-                    placeholder="teacher@dypatil.edu"
-                    className="w-full border border-slate-300 rounded-xl p-2 text-xs"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-700">Mobile Phone</label>
-                  <input
-                    type="tel"
-                    value={newTeacherPhone}
-                    onChange={(e) => setNewTeacherPhone(e.target.value)}
-                    className="w-full border border-slate-300 rounded-xl p-2 text-xs font-mono"
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+              <div className="flex items-center justify-end gap-2.5 pt-3">
                 <button
                   type="button"
                   onClick={() => setShowAddTeacherModal(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
+                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md cursor-pointer"
                 >
-                  Create & Issue Code
+                  Create Faculty
                 </button>
               </div>
             </form>
@@ -2199,96 +2094,102 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
         </div>
       )}
 
-      {/* MODAL 7: ADD TIMETABLE SLOT */}
+      {/* MODAL: ADD TIMETABLE SLOT */}
       {showAddSlotModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5">
-          <div className="bg-white rounded-2xl max-w-lg w-full border border-slate-200 shadow-2xl overflow-hidden animate-fadeIn">
-            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-sky-400" />
-                <h3 className="text-sm font-bold">Schedule Lecture Slot (Timetable)</h3>
-              </div>
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white rounded-3xl p-6 sm:p-7 max-w-lg w-full shadow-2xl border border-slate-200 space-y-4 animate-scaleUp">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <h3 className="text-base font-extrabold text-slate-900">Schedule Lecture Hour</h3>
               <button
                 type="button"
                 onClick={() => setShowAddSlotModal(false)}
-                className="text-slate-400 hover:text-white cursor-pointer"
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
               >
-                &times;
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveNewSlot} className="p-5 space-y-4">
-              <div className="grid grid-cols-3 gap-3">
+            <form onSubmit={handleSaveNewSlot} className="space-y-3.5">
+              <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700">Day of Week</label>
+                  <label className="block text-xs font-bold text-slate-700">Day of Week</label>
                   <select
                     value={newSlotDay}
                     onChange={(e) => setNewSlotDay(e.target.value as DayOfWeek)}
-                    className="w-full border border-slate-300 rounded-xl p-2 text-xs font-bold"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900"
                   >
                     {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map(d => (
                       <option key={d} value={d}>{d}</option>
                     ))}
                   </select>
                 </div>
-
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700">Start Time</label>
+                  <label className="block text-xs font-bold text-slate-700">Subject Name *</label>
+                  <input
+                    type="text"
+                    value={newSlotSubject}
+                    onChange={(e) => setNewSlotSubject(e.target.value)}
+                    placeholder="e.g. Cyber Security"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-slate-700">Start Time</label>
                   <input
                     type="text"
                     value={newSlotStartTime}
                     onChange={(e) => setNewSlotStartTime(e.target.value)}
                     placeholder="08:00 AM"
-                    className="w-full border border-slate-300 rounded-xl p-2 text-xs font-mono font-bold"
-                    required
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-900"
                   />
                 </div>
-
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700">End Time</label>
+                  <label className="block text-xs font-bold text-slate-700">End Time</label>
                   <input
                     type="text"
                     value={newSlotEndTime}
                     onChange={(e) => setNewSlotEndTime(e.target.value)}
                     placeholder="09:00 AM"
-                    className="w-full border border-slate-300 rounded-xl p-2 text-xs font-mono font-bold"
-                    required
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-900"
                   />
                 </div>
               </div>
 
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700">Subject Name</label>
-                <input
-                  type="text"
-                  value={newSlotSubject}
-                  onChange={(e) => setNewSlotSubject(e.target.value)}
-                  placeholder="e.g. Data Structures & Algorithms"
-                  className="w-full border border-slate-300 rounded-xl p-2 text-xs font-semibold"
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700">Class / Division</label>
+                  <label className="block text-xs font-bold text-slate-700">Class</label>
                   <select
                     value={newSlotClassId}
                     onChange={(e) => setNewSlotClassId(e.target.value)}
-                    className="w-full border border-slate-300 rounded-xl p-2 text-xs"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900"
                   >
                     {classes.map(c => (
                       <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
                   </select>
                 </div>
-
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700">Classroom / Lab</label>
+                  <label className="block text-xs font-bold text-slate-700">Faculty</label>
+                  <select
+                    value={newSlotTeacherId}
+                    onChange={(e) => setNewSlotTeacherId(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900"
+                  >
+                    {teachers.map(t => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-slate-700">Classroom</label>
                   <select
                     value={newSlotRoomId}
                     onChange={(e) => setNewSlotRoomId(e.target.value)}
-                    className="w-full border border-slate-300 rounded-xl p-2 text-xs"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900"
                   >
                     {classrooms.map(r => (
                       <option key={r.id} value={r.id}>{r.name}</option>
@@ -2297,32 +2198,19 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
                 </div>
               </div>
 
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700">Assigned Faculty / Teacher</label>
-                <select
-                  value={newSlotTeacherId}
-                  onChange={(e) => setNewSlotTeacherId(e.target.value)}
-                  className="w-full border border-slate-300 rounded-xl p-2 text-xs font-semibold"
-                >
-                  {teachers.map(t => (
-                    <option key={t.id} value={t.id}>{t.name} ({t.uniqueCode})</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+              <div className="flex items-center justify-end gap-2.5 pt-3">
                 <button
                   type="button"
                   onClick={() => setShowAddSlotModal(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-sky-600 hover:bg-sky-700 text-white cursor-pointer"
+                  className="px-5 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold shadow-md cursor-pointer"
                 >
-                  Save into Timetable
+                  Schedule Lecture
                 </button>
               </div>
             </form>
@@ -2330,90 +2218,212 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
         </div>
       )}
 
-      {/* MODAL 8: ADD CLASSROOM */}
+      {/* MODAL: ADD CLASSROOM */}
       {showAddRoomModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5">
-          <div className="bg-white rounded-2xl max-w-md w-full border border-slate-200 shadow-2xl overflow-hidden animate-fadeIn">
-            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Building className="w-4 h-4 text-indigo-400" />
-                <h3 className="text-sm font-bold">Add Campus Classroom / Lab</h3>
-              </div>
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl border border-slate-200 space-y-4 animate-scaleUp">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <h3 className="text-base font-extrabold text-slate-900">Add Classroom / Lab</h3>
               <button
                 type="button"
                 onClick={() => setShowAddRoomModal(false)}
-                className="text-slate-400 hover:text-white cursor-pointer"
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
               >
-                &times;
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveNewClassroom} className="p-5 space-y-4">
+            <form onSubmit={handleSaveNewClassroom} className="space-y-3.5">
               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700">Room / Lab Name</label>
+                <label className="block text-xs font-bold text-slate-700">Room Name / Number *</label>
                 <input
                   type="text"
                   value={newRoomName}
                   onChange={(e) => setNewRoomName(e.target.value)}
-                  placeholder="e.g. Room 405 (IoT Lab)"
-                  className="w-full border border-slate-300 rounded-xl p-2 text-xs font-semibold"
-                  required
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700">Building / Wing</label>
-                <input
-                  type="text"
-                  value={newRoomBuilding}
-                  onChange={(e) => setNewRoomBuilding(e.target.value)}
-                  className="w-full border border-slate-300 rounded-xl p-2 text-xs"
+                  placeholder="e.g. Room 401 / Lab 2"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900"
                   required
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700">Student Capacity</label>
+                  <label className="block text-xs font-bold text-slate-700">Building / Wing</label>
+                  <input
+                    type="text"
+                    value={newRoomBuilding}
+                    onChange={(e) => setNewRoomBuilding(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-slate-700">Capacity</label>
                   <input
                     type="number"
                     value={newRoomCapacity}
                     onChange={(e) => setNewRoomCapacity(Number(e.target.value))}
-                    className="w-full border border-slate-300 rounded-xl p-2 text-xs font-mono font-bold"
-                    required
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono text-slate-900"
                   />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700">Room Type</label>
-                  <select
-                    value={newRoomType}
-                    onChange={(e) => setNewRoomType(e.target.value as any)}
-                    className="w-full border border-slate-300 rounded-xl p-2 text-xs"
-                  >
-                    <option value="classroom">Classroom</option>
-                    <option value="lab">Computer / Hardware Lab</option>
-                    <option value="seminar_hall">Auditorium / Seminar</option>
-                  </select>
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+              <div className="flex items-center justify-end gap-2.5 pt-3">
                 <button
                   type="button"
                   onClick={() => setShowAddRoomModal(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer"
+                  className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md cursor-pointer"
                 >
-                  Add Space
+                  Create Room
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRM MODAL: RESET CAMPUS SYSTEM */}
+      {showResetCampusModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl border border-slate-200 space-y-4 animate-scaleUp">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0 border border-rose-200">
+                <RotateCcw className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-extrabold text-slate-900">Reset Campus System?</h3>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  This will restore the default D.Y. Patil ECE Division A campus configuration and sample timetable.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowResetCampusModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onResetAllData();
+                  setShowResetCampusModal(false);
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md cursor-pointer"
+              >
+                Yes, Reset System
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRM MODAL: RESET SETTINGS ONLY */}
+      {showResetSettingsModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl border border-slate-200 space-y-4 animate-scaleUp">
+            <h3 className="text-base font-extrabold text-slate-900">Reset Campus Settings?</h3>
+            <p className="text-xs text-slate-600">
+              Reset department name and default parameters to factory configuration.
+            </p>
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowResetSettingsModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onResetSettings();
+                  setShowResetSettingsModal(false);
+                }}
+                className="px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold cursor-pointer"
+              >
+                Reset Settings
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRM MODAL: DELETE SINGLE STUDENT */}
+      {studentToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl border border-slate-200 space-y-4 animate-scaleUp">
+            <h3 className="text-base font-extrabold text-slate-900">
+              Delete Student #{studentToDelete.rollNo} ({studentToDelete.name})?
+            </h3>
+            <p className="text-xs text-slate-600">
+              This will permanently delete this student record from the campus database.
+            </p>
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setStudentToDelete(null)}
+                className="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onDeleteStudent(studentToDelete.id);
+                  setStudentToDelete(null);
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold cursor-pointer"
+              >
+                Delete Student
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRM MODAL: DELETE ALL STUDENTS */}
+      {showDeleteAllStudentsModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl border border-slate-200 space-y-4 animate-scaleUp">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">Delete All Students?</h3>
+                <p className="text-xs text-slate-600">
+                  Are you sure you want to permanently delete all {students.length} students from the database?
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowDeleteAllStudentsModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onDeleteAllStudents('all_campus');
+                  setShowDeleteAllStudentsModal(false);
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold cursor-pointer"
+              >
+                Yes, Delete All
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -29,6 +29,8 @@ interface DefaultersViewProps {
   timetable?: TimetableSlot[];
   onNavigateToSession?: (classId: string, date: string, lectureSlotId?: string) => void;
   onOpenWhatsAppModal?: () => void;
+  onClearDateAttendance?: (dateStr: string) => void;
+  onClearSession?: (sessionId: string) => void;
 }
 
 export const DefaultersView: React.FC<DefaultersViewProps> = ({
@@ -41,7 +43,9 @@ export const DefaultersView: React.FC<DefaultersViewProps> = ({
   currentUser,
   timetable,
   onNavigateToSession,
-  onOpenWhatsAppModal
+  onOpenWhatsAppModal,
+  onClearDateAttendance,
+  onClearSession
 }) => {
   const [threshold, setThreshold] = useState<number>(settings.defaulterThreshold || 50);
   
@@ -472,9 +476,11 @@ export const DefaultersView: React.FC<DefaultersViewProps> = ({
           settings={settings}
           selectedDate={calendarSelectedDate}
           onSelectDate={(dateStr) => setCalendarSelectedDate(dateStr)}
-          onNavigateToSession={onNavigateToSession}
+          onNavigateToSession={currentUser?.role === 'teacher' ? onNavigateToSession : undefined}
           onExportSessionCSV={handleExportSessionCSV}
           sendAbsentParentAlert={sendAbsentParentAlert}
+          onClearDateAttendance={onClearDateAttendance}
+          onClearSession={onClearSession}
           currentUser={currentUser}
           timetable={timetable}
         />

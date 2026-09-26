@@ -101,6 +101,7 @@ export interface SystemSettings {
   collegeName: string; // "D.Y.PATIL TECHNICAL CAMPUS"
   departmentName: string; // "Computer Engineering & Technology"
   hodName: string; // "Dr. S. K. Patil (HOD)"
+  hodUsername?: string; // HOD login username e.g. "dyp" or "hod_admin"
   hodPasscode: string; // "DYP-HOD-2026"
   hodPasswordHash?: string; // Cryptographic SHA-256 integrity hash
   defaulterThreshold: number; // e.g. 50 (percentage)

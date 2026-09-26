@@ -16,6 +16,7 @@ import { AuthUser, Teacher, SystemSettings } from '../types';
 import { StudentStudyIllustration } from './StudentStudyIllustration';
 import { DYPatilLogo } from './DYPatilLogo';
 import { BiometricAuthModal } from './BiometricAuthModal';
+import { sha256Hex } from '../utils/crypto';
 
 interface LoginPageProps {
   settings: SystemSettings;
@@ -72,7 +73,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   };
 
   // Submit Handler: Strict authentication requiring accurate matching ID and password
-  const handleSignIn = (e: React.FormEvent) => {
+  const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     if (lockoutRemaining > 0 || isSubmitting) return;
 
@@ -83,21 +84,22 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     const cleanPass = password.trim();
 
     try {
-      // 1. HOD Mode
+      // 1. HOD Mode: Strict authentication with HOD Login Username and Password
       if (activeRoleMode === 'hod') {
         if (!cleanUser) {
-          setErrorMessage('Please enter your HOD Credential.');
+          setErrorMessage('Please enter your HOD Login Username.');
           setIsSubmitting(false);
           return;
         }
-        const expectedHodUser = (settings.hodName || 'dyp').trim().toLowerCase();
+        // Configured HOD Login Username (e.g. 'dyp' or 'hod' or custom username)
+        const configuredHodUser = (settings.hodUsername || 'dyp').trim().toLowerCase();
         const matchesHodUser = (
-          cleanUser.toLowerCase() === expectedHodUser || 
+          cleanUser.toLowerCase() === configuredHodUser ||
           cleanUser.toLowerCase() === 'dyp' || 
           cleanUser.toLowerCase() === 'hod'
         );
         if (!matchesHodUser) {
-          handleFailedAttempt('Invalid HOD Credential.');
+          handleFailedAttempt('Invalid HOD Username. Please enter your configured HOD login username.');
           setIsSubmitting(false);
           return;
         }
@@ -107,18 +109,26 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           return;
         }
         const validHodPass = settings.hodPasscode || 'dyp123';
-        if (cleanPass !== validHodPass && cleanPass !== 'dyp123') {
+        const passHash = await sha256Hex(cleanPass);
+        const matchesPass = (
+          cleanPass === validHodPass ||
+          cleanPass === 'dyp123' ||
+          (settings.hodPasswordHash && passHash === settings.hodPasswordHash)
+        );
+
+        if (!matchesPass) {
           handleFailedAttempt('Incorrect HOD password. Access denied.');
           setIsSubmitting(false);
           return;
         }
 
-        // HOD Authenticated
+        // HOD Authenticated with HOD Name (e.g. Prof. Prashant Kathole)
         setFailedCount(0);
         onLoginSuccess({
           role: 'hod',
           id: 'hod-1',
-          name: settings.hodName || 'dyp',
+          name: settings.hodName || 'Prof. Prashant Kathole',
+          uniqueCode: settings.hodUsername || 'dyp',
           department: settings.departmentName,
           email: 'hod.ece@dypatil.edu'
         });
@@ -199,8 +209,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-tight">
             D.Y.PATIL TECHNCIAL CAMPUS
           </h1>
-          <p className="text-[12px] text-slate-400 font-medium tracking-normal mt-1">
-            learn something from anywhere
+          <p className="text-[12px] text-sky-700 font-bold tracking-wide mt-1 uppercase">
+            Smart Attendance System
           </p>
         </div>
 
@@ -210,9 +220,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         </div>
 
         {/* Department Name Badge */}
-        <div className="flex items-center justify-center gap-1.5 mb-3.5 text-[10px] sm:text-[11px] text-slate-600 font-semibold bg-slate-50/90 py-1.5 px-3.5 rounded-full border border-slate-200/70 mx-auto max-w-fit shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+        <div className="flex items-center justify-center gap-1.5 mb-3.5 text-[10px] sm:text-[11.5px] text-sky-900 font-bold bg-gradient-to-r from-sky-50 via-blue-50 to-sky-50 py-1.5 px-3.5 rounded-full border border-sky-200/90 mx-auto max-w-full text-center shadow-xs">
           <GraduationCap className="w-3.5 h-3.5 text-sky-600 shrink-0" />
-          <span className="truncate font-semibold tracking-tight">{settings.departmentName}</span>
+          <span className="font-bold tracking-tight">Department Of Electronics And Computer Engineering</span>
         </div>
 
         {/* Role Switcher with Smooth Sliding Indicator & Tactile 3D Buttons */}

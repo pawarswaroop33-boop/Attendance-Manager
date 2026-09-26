@@ -21,7 +21,10 @@ import {
   ArrowRight,
   X,
   CalendarOff,
-  Lock
+  Lock,
+  Trash2,
+  AlertTriangle,
+  RotateCcw
 } from 'lucide-react';
 import { Student, ClassGroup, AttendanceSession, SystemSettings, AuthUser, TimetableSlot } from '../types';
 import {
@@ -47,6 +50,8 @@ interface AttendanceCalendarProps {
   onNavigateToSession?: (classId: string, date: string, lectureSlotId?: string) => void;
   onExportSessionCSV: (session: AttendanceSession, sessionDay: string) => void;
   sendAbsentParentAlert: (student: Student, session: AttendanceSession, sessionDay: string) => void;
+  onClearDateAttendance?: (dateStr: string) => void;
+  onClearSession?: (sessionId: string) => void;
   currentUser?: AuthUser;
   timetable?: TimetableSlot[];
 }
@@ -61,6 +66,8 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
   onNavigateToSession,
   onExportSessionCSV,
   sendAbsentParentAlert,
+  onClearDateAttendance,
+  onClearSession,
   currentUser,
   timetable = []
 }) => {
@@ -78,6 +85,10 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
   const [viewYear, setViewYear] = useState<number>(initialParsed.year);
   const [viewMonth, setViewMonth] = useState<number>(initialParsed.monthIndex);
   const [selectedClassFilter, setSelectedClassFilter] = useState<string>('all');
+
+  // Modal confirmation states for clearing attendance
+  const [confirmClearDate, setConfirmClearDate] = useState<string | null>(null);
+  const [confirmClearSessionId, setConfirmClearSessionId] = useState<string | null>(null);
 
   // Expanded lecture card for viewing roster
   const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
@@ -221,12 +232,12 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
             
             {/* Month & Year Title with Navigation Controls */}
             <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-2xl p-1 shadow-xs">
+              <div className="flex items-center gap-1.5 bg-gradient-to-b from-white to-slate-50 border border-slate-300/90 rounded-2xl p-1 shadow-[0_1px_3px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,1)]">
                 <button
                   type="button"
                   onClick={handlePrevMonth}
                   aria-label="Previous Month"
-                  className="w-8 h-8 rounded-xl flex items-center justify-center text-slate-700 hover:text-slate-900 hover:bg-slate-100 active:scale-90 transition-all cursor-pointer"
+                  className="w-8 h-8 rounded-xl flex items-center justify-center text-slate-700 hover:text-slate-950 hover:bg-slate-100 active:scale-90 active:translate-y-0.5 transition-all cursor-pointer"
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
@@ -239,7 +250,7 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
                   type="button"
                   onClick={handleNextMonth}
                   aria-label="Next Month"
-                  className="w-8 h-8 rounded-xl flex items-center justify-center text-slate-700 hover:text-slate-900 hover:bg-slate-100 active:scale-90 transition-all cursor-pointer"
+                  className="w-8 h-8 rounded-xl flex items-center justify-center text-slate-700 hover:text-slate-950 hover:bg-slate-100 active:scale-90 active:translate-y-0.5 transition-all cursor-pointer"
                 >
                   <ChevronRight className="w-4 h-4" />
                 </button>
@@ -249,7 +260,7 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
               <button
                 type="button"
                 onClick={handleJumpToToday}
-                className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold transition-all active:scale-95 cursor-pointer shadow-2xs border border-slate-200"
+                className="px-3.5 py-2 rounded-xl bg-gradient-to-b from-white to-slate-100 hover:to-slate-200 text-slate-800 text-xs font-black transition-all active:scale-95 active:translate-y-0.5 cursor-pointer shadow-xs border border-slate-300 btn-tactile"
               >
                 Today
               </button>
@@ -264,7 +275,7 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
               {/* Quick Jump Dropdown for dates with attendance */}
               {recordedDatesList.length > 0 && (
                 <div className="hidden sm:flex items-center gap-1.5 text-xs">
-                  <span className="text-slate-400 font-medium">Quick Jump:</span>
+                  <span className="text-slate-500 font-bold">Quick Jump:</span>
                   <select
                     value={selectedDate && recordedDatesList.includes(selectedDate) ? selectedDate : ''}
                     onChange={(e) => {
@@ -278,7 +289,7 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
                         onSelectDate(null);
                       }
                     }}
-                    className="bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-semibold focus:outline-hidden focus:ring-2 focus:ring-slate-900 cursor-pointer shadow-2xs"
+                    className="bg-gradient-to-b from-white to-slate-50 border border-slate-300/90 rounded-xl px-2.5 py-1.5 text-xs text-slate-900 font-bold focus:outline-hidden focus:ring-2 focus:ring-slate-900 cursor-pointer shadow-[0_1px_2px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,1)]"
                   >
                     <option value="">Recorded Dates ({recordedDatesList.length})</option>
                     {recordedDatesList.map(dateStr => (
@@ -295,11 +306,11 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
             <div className="flex flex-wrap items-center gap-3">
               {/* Class Filter */}
               <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-slate-500">Class:</span>
+                <span className="text-xs font-bold text-slate-600">Class:</span>
                 <select
                   value={selectedClassFilter}
                   onChange={(e) => setSelectedClassFilter(e.target.value)}
-                  className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-800 font-bold focus:outline-hidden focus:ring-2 focus:ring-slate-900 cursor-pointer shadow-2xs"
+                  className="bg-gradient-to-b from-white to-slate-50 border border-slate-300/90 rounded-xl px-3 py-1.5 text-xs text-slate-900 font-bold focus:outline-hidden focus:ring-2 focus:ring-slate-900 cursor-pointer shadow-[0_1px_2px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,1)]"
                 >
                   <option value="all">All Academic Classes</option>
                   {classes.map(cls => (
@@ -487,7 +498,7 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
             </div>
 
             {/* Quick Date Stats & Action */}
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2.5">
               {selectedDateSummary ? (
                 <div className="flex items-center gap-2 bg-slate-800/90 border border-slate-700 px-3.5 py-2 rounded-xl shadow-xs">
                   <div className="text-right pr-2 border-r border-slate-700">
@@ -509,32 +520,48 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
                 </div>
               ) : null}
 
-              {hasScheduledLectureOnSelectedDate ? (
-                onNavigateToSession && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const targetSlot = scheduledLecturesForSelectedDate[0];
-                      onNavigateToSession(targetSlot?.classId || classes[0]?.id || '', selectedDate, targetSlot?.id);
-                    }}
-                    className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-extrabold transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <PlusCircle className="w-4 h-4" />
-                    <span>Take Attendance</span>
-                  </button>
+              {/* HOD Specific Action: Clear Attendance for this Date */}
+              {currentUser?.role === 'hod' && selectedDateSessions.length > 0 && onClearDateAttendance && (
+                <button
+                  type="button"
+                  onClick={() => setConfirmClearDate(selectedDate)}
+                  className="px-3.5 py-2 rounded-xl bg-gradient-to-b from-rose-500/20 to-rose-600/30 hover:to-rose-600/40 text-rose-200 hover:text-white border border-rose-500/50 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95 active:translate-y-0.5"
+                  title="Clear all attendance records for this date"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Clear Attendance for Date</span>
+                </button>
+              )}
+
+              {/* Teacher Specific Action: Take Attendance (HOD cannot take attendance) */}
+              {currentUser?.role === 'teacher' && (
+                hasScheduledLectureOnSelectedDate ? (
+                  onNavigateToSession && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const targetSlot = scheduledLecturesForSelectedDate[0];
+                        onNavigateToSession(targetSlot?.classId || classes[0]?.id || '', selectedDate, targetSlot?.id);
+                      }}
+                      className="px-4 py-2.5 rounded-xl bg-gradient-to-b from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 active:scale-95 active:translate-y-0.5 text-white text-xs font-black transition-all shadow-[0_3px_10px_rgba(16,185,129,0.35),inset_0_1px_0_rgba(255,255,255,0.3)] border border-emerald-400/40 flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <PlusCircle className="w-4 h-4" />
+                      <span>Take Attendance</span>
+                    </button>
+                  )
+                ) : (
+                  <div className="px-3.5 py-2 rounded-xl bg-slate-800/90 border border-slate-700 text-amber-400 text-xs font-bold flex items-center gap-1.5 shadow-xs">
+                    <Lock className="w-3.5 h-3.5 text-amber-400" />
+                    <span>No Lecture Today</span>
+                  </div>
                 )
-              ) : (
-                <div className="px-3.5 py-2 rounded-xl bg-slate-800/90 border border-slate-700 text-amber-400 text-xs font-bold flex items-center gap-1.5">
-                  <Lock className="w-3.5 h-3.5 text-amber-400" />
-                  <span>No Lecture Today</span>
-                </div>
               )}
 
               {/* Close / Deselect Button */}
               <button
                 type="button"
                 onClick={() => onSelectDate(null)}
-                className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-bold transition-all border border-slate-700 cursor-pointer flex items-center gap-1.5"
+                className="px-3 py-2 rounded-xl bg-gradient-to-b from-slate-800 to-slate-900 hover:from-slate-700 hover:to-slate-800 text-slate-200 hover:text-white text-xs font-bold transition-all border border-slate-700/90 cursor-pointer flex items-center gap-1.5 shadow-xs active:translate-y-0.5"
                 title="Close date inspection"
               >
                 <X className="w-3.5 h-3.5" />
@@ -566,7 +593,7 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
               </div>
             </div>
           ) : (
-            /* Scheduled slots ready to take attendance */
+            /* Scheduled slots ready to take attendance (Teachers only) */
             <div className="bg-white rounded-3xl border border-dashed border-sky-300 p-6 sm:p-8 text-center space-y-4 shadow-xs">
               <div className="w-14 h-14 rounded-2xl bg-sky-50 text-sky-700 flex items-center justify-center mx-auto shadow-inner border border-sky-200">
                 <BookOpen className="w-7 h-7" />
@@ -577,7 +604,9 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
                   Scheduled Lectures for {formatDateWithDay(selectedDate, selectedDateDayOfWeek)}
                 </h3>
                 <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
-                  Click below to take attendance for this scheduled lecture.
+                  {currentUser?.role === 'teacher'
+                    ? 'Click below to take attendance for this scheduled lecture.'
+                    : 'Faculty members will take attendance for their respective scheduled lectures.'}
                 </p>
               </div>
 
@@ -590,9 +619,9 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
                         {slot.timeSlotLabel}
                       </span>
                       <h4 className="font-extrabold text-slate-900 text-sm mt-1">{slot.subject}</h4>
-                      <p className="text-[11px] text-slate-600">{slot.className} &bull; {slot.roomName}</p>
+                      <p className="text-[11px] text-slate-600">{slot.className} &bull; {slot.roomName} &bull; Faculty: {slot.teacherName}</p>
                     </div>
-                    {onNavigateToSession && (
+                    {currentUser?.role === 'teacher' && onNavigateToSession && (
                       <button
                         type="button"
                         onClick={() => onNavigateToSession(slot.classId, selectedDate, slot.id)}
@@ -686,10 +715,10 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
                         <button
                           type="button"
                           onClick={() => setExpandedSessionId(isExpanded ? null : session.id)}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer btn-tactile ${
                             isExpanded
-                              ? 'bg-slate-900 text-white shadow-xs'
-                              : 'bg-slate-100 hover:bg-slate-200 text-slate-800'
+                              ? 'bg-slate-900 text-white shadow-[0_2px_6px_rgba(15,23,42,0.35),inset_0_1px_0_rgba(255,255,255,0.15)] border border-slate-950'
+                              : 'bg-gradient-to-b from-white to-slate-100 hover:to-slate-200 text-slate-800 border border-slate-200 shadow-xs'
                           }`}
                         >
                           <Eye className="w-3.5 h-3.5" />
@@ -701,19 +730,32 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
                         <button
                           type="button"
                           onClick={() => onExportSessionCSV(session, sessionDay)}
-                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 transition-colors cursor-pointer"
+                          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold text-slate-700 hover:text-slate-950 bg-gradient-to-b from-white to-slate-100 hover:to-slate-200 border border-slate-200 shadow-xs transition-all cursor-pointer btn-tactile"
                           title="Download CSV for this lecture"
                         >
                           <Download className="w-3.5 h-3.5" />
                           <span className="hidden sm:inline">CSV</span>
                         </button>
 
-                        {/* Edit in Live Marking View */}
-                        {onNavigateToSession && (
+                        {/* HOD Delete Session Option */}
+                        {currentUser?.role === 'hod' && onClearSession && (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmClearSessionId(session.id)}
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold text-rose-700 hover:text-rose-900 bg-gradient-to-b from-rose-50 to-rose-100/80 hover:to-rose-100 border border-rose-200 shadow-xs transition-all cursor-pointer btn-tactile"
+                            title="Delete this lecture session"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                            <span className="hidden sm:inline">Clear Session</span>
+                          </button>
+                        )}
+
+                        {/* Teacher Edit in Live Marking View (Teachers only) */}
+                        {currentUser?.role === 'teacher' && onNavigateToSession && (
                           <button
                             type="button"
                             onClick={() => onNavigateToSession(session.classId, session.date, session.lectureSlotId)}
-                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold text-sky-700 hover:text-sky-900 bg-sky-50 hover:bg-sky-100 border border-sky-200 transition-colors cursor-pointer"
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold text-sky-800 hover:text-sky-950 bg-gradient-to-b from-sky-50 to-sky-100/80 hover:to-sky-100 border border-sky-300 shadow-xs transition-all cursor-pointer btn-tactile"
                             title="Edit or review in Dashboard"
                           >
                             <Edit3 className="w-3.5 h-3.5" />
@@ -942,6 +984,101 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
         </div>
       </div>
     )}
+
+      {/* CONFIRMATION MODAL: Clear Date Attendance (HOD) */}
+      {confirmClearDate && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl border border-slate-200 space-y-5 animate-scaleUp">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0 border border-rose-200">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-extrabold text-slate-900">
+                  Clear Attendance for {formatDateWithDay(confirmClearDate)}?
+                </h3>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Are you sure you want to permanently clear all attendance records and lectures taken on <strong className="text-slate-900">{formatDateWithDay(confirmClearDate)}</strong>?
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl text-xs text-rose-800 font-semibold flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+              <span>
+                This will delete the attendance logs for this day across all divisions. This change will be synchronized to the cloud database.
+              </span>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setConfirmClearDate(null)}
+                className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onClearDateAttendance && confirmClearDate) {
+                    onClearDateAttendance(confirmClearDate);
+                    setConfirmClearDate(null);
+                  }
+                }}
+                className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 active:scale-95 text-white text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-md"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Yes, Clear Day's Attendance</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRMATION MODAL: Clear Single Session */}
+      {confirmClearSessionId && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl border border-slate-200 space-y-5 animate-scaleUp">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0 border border-rose-200">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-extrabold text-slate-900">
+                  Delete Lecture Session?
+                </h3>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Are you sure you want to permanently delete this specific lecture attendance record?
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setConfirmClearSessionId(null)}
+                className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onClearSession && confirmClearSessionId) {
+                    onClearSession(confirmClearSessionId);
+                    setConfirmClearSessionId(null);
+                  }
+                }}
+                className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 active:scale-95 text-white text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-md"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Yes, Delete Session</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

@@ -77,13 +77,17 @@ export default function App() {
       const saved = localStorage.getItem(STORAGE_KEY_SETTINGS);
       if (saved) {
         const parsed = JSON.parse(saved);
+        const resolvedHodName = (parsed.hodName === 'Dr. S. K. Patil (HOD)' || parsed.hodName === 'dyp' || !parsed.hodName)
+          ? 'Prof. Prashant Kathole'
+          : parsed.hodName;
         return {
           ...parsed,
           collegeName: 'D.Y.PATIL TECHNCIAL CAMPUS',
           departmentName: parsed.departmentName?.includes('Electronics')
-            ? 'Department Of Electronics and Computer Engineering'
-            : (parsed.departmentName || 'Department Of Electronics and Computer Engineering'),
-          hodName: (parsed.hodName === 'Dr. S. K. Patil (HOD)' || !parsed.hodName) ? 'dyp' : parsed.hodName,
+            ? 'Department Of Electronics And Computer Engineering'
+            : (parsed.departmentName || 'Department Of Electronics And Computer Engineering'),
+          hodName: resolvedHodName,
+          hodUsername: parsed.hodUsername || 'dyp',
           hodPasscode: (parsed.hodPasscode === 'DYP-HOD-2026' || !parsed.hodPasscode) ? 'dyp123' : parsed.hodPasscode
         };
       }
@@ -167,15 +171,9 @@ export default function App() {
   const [sessions, setSessions] = useState<AttendanceSession[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_SESSIONS);
-      if (saved) {
+      if (saved !== null) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.some(s => s.classId === 'class-ece-a')) {
-          const initial = generateInitialSessions(INITIAL_CLASSES, INITIAL_STUDENTS);
-          const existingIds = new Set(parsed.map((s: AttendanceSession) => s.id));
-          const missing = initial.filter(s => !existingIds.has(s.id));
-          if (missing.length > 0) {
-            return [...parsed, ...missing];
-          }
+        if (Array.isArray(parsed)) {
           return parsed;
         }
       }
@@ -192,6 +190,13 @@ export default function App() {
   const [activeLectureSlotId, setActiveLectureSlotId] = useState<string | undefined>(() => {
     return 'slot-mon-1';
   });
+
+  // HOD Role Guard: HOD must never have access to take live attendance
+  useEffect(() => {
+    if (currentUser?.role === 'hod' && currentTab === 'dashboard') {
+      setCurrentTab('hod');
+    }
+  }, [currentUser, currentTab]);
 
   // Automatically keep active lecture slot scoped to the logged-in teacher and selected date
   useEffect(() => {
@@ -950,7 +955,11 @@ export default function App() {
     setSelectedDate(date);
     setSelectedClassId(slot.classId);
     setActiveLectureSlotId(slot.id);
-    handleTabChange('dashboard'); // Navigate directly to Attendance Roster so the teacher can tick students!
+    if (currentUser?.role === 'hod') {
+      handleTabChange('defaulters');
+    } else {
+      handleTabChange('dashboard'); // Navigate directly to Attendance Roster so the teacher can tick students!
+    }
   };
 
   // Calculate Defaulters Count for Header Badge (Req 15 & 16)
@@ -1124,6 +1133,68 @@ export default function App() {
     }
   };
 
+  // Clear all attendance for a specific date (HOD Authority)
+  const handleClearDateAttendance = async (dateStr: string) => {
+    notifyUserChange();
+    const filteredSessions = sessions.filter(s => s.date !== dateStr);
+    setSessions(filteredSessions);
+
+    try {
+      localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(filteredSessions));
+    } catch (_) {}
+
+    setCloudSyncing(true);
+    try {
+      await dbService.saveEntireCampusState({
+        settings,
+        classes,
+        students,
+        teachers,
+        classrooms,
+        timetable,
+        sessions: filteredSessions
+      });
+      lastSyncedHashRef.current = `${settings.collegeName}_${classes.length}_${students.length}_${filteredSessions.length}_${timetable.length}`;
+      showToast(`Attendance records for ${dateStr} have been completely cleared and synced.`, 'success');
+    } catch (err) {
+      console.warn('Clear date cloud sync notice:', err);
+      showToast(`Attendance records for ${dateStr} cleared locally.`, 'success');
+    } finally {
+      setCloudSyncing(false);
+    }
+  };
+
+  // Clear a specific lecture session
+  const handleClearSession = async (sessionId: string) => {
+    notifyUserChange();
+    const filteredSessions = sessions.filter(s => s.id !== sessionId);
+    setSessions(filteredSessions);
+
+    try {
+      localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(filteredSessions));
+    } catch (_) {}
+
+    setCloudSyncing(true);
+    try {
+      await dbService.saveEntireCampusState({
+        settings,
+        classes,
+        students,
+        teachers,
+        classrooms,
+        timetable,
+        sessions: filteredSessions
+      });
+      lastSyncedHashRef.current = `${settings.collegeName}_${classes.length}_${students.length}_${filteredSessions.length}_${timetable.length}`;
+      showToast('Lecture attendance session record removed and synced.', 'info');
+    } catch (err) {
+      console.warn('Clear session cloud sync notice:', err);
+      showToast('Lecture attendance session record removed.', 'info');
+    } finally {
+      setCloudSyncing(false);
+    }
+  };
+
   // Reset Campus Settings Only
   const handleResetSettingsOnly = () => {
     notifyUserChange();
@@ -1214,10 +1285,12 @@ export default function App() {
         settings={settings}
         teachers={teachers}
         onLoginSuccess={(user) => {
+          const initialTargetTab = user.role === 'hod' ? 'hod' : 'dashboard';
           try {
-            window.history.pushState({ screen: 'app', tab: 'dashboard' }, '');
+            window.history.pushState({ screen: 'app', tab: initialTargetTab }, '');
           } catch (_) {}
           setCurrentUser(user);
+          setCurrentTab(initialTargetTab);
           // If teacher, set their first assigned class as active and initial slot
           if (user.role === 'teacher') {
             if (user.assignedClasses && user.assignedClasses[0]) {
@@ -1288,41 +1361,10 @@ export default function App() {
         activeDbProvider={dbService.currentProvider === 'supabase' ? 'Supabase' : 'Firebase'}
       />
 
-      {/* Active Lecture Banner (Req 13) */}
-      {activeSlot && currentTab === 'dashboard' && (
-        <div className="bg-sky-50 border-b border-sky-200 py-2.5 px-4">
-          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-            <div className="flex items-center gap-2">
-              <span className="px-2 py-0.5 rounded-md bg-sky-600 text-white font-mono font-bold text-[11px]">
-                {activeSlot.timeSlotLabel}
-              </span>
-              <span className="font-extrabold text-sky-950 text-sm">
-                {activeSlot.subject}
-              </span>
-              <span className="text-sky-700 hidden sm:inline">&bull;</span>
-              <span className="text-sky-800 font-medium hidden sm:inline">
-                {activeSlot.roomName} &bull; Faculty: {activeSlot.teacherName}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-sky-700 font-semibold">Ticking Live Attendance for this lecture</span>
-              {currentUser.role === 'hod' && (
-                <button
-                  type="button"
-                  onClick={() => setActiveLectureSlotId(undefined)}
-                  className="text-[11px] text-sky-600 hover:text-sky-900 underline font-bold cursor-pointer"
-                >
-                  Clear Lecture Filter
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 min-w-0 overflow-x-hidden">
+      <main className={`flex-1 w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 min-w-0 ${
+        currentTab === 'hod' ? 'max-w-[1680px]' : 'max-w-7xl'
+      }`}>
         
         {/* VIEW 1: MARK ATTENDANCE */}
         {currentTab === 'dashboard' && (
@@ -1383,13 +1425,15 @@ export default function App() {
             userRole={currentUser.role}
             currentUser={currentUser}
             timetable={timetable}
-            onNavigateToSession={(classId, date, slotId) => {
+            onNavigateToSession={currentUser.role === 'teacher' ? (classId, date, slotId) => {
               setSelectedClassId(classId);
               setSelectedDate(date);
               setActiveLectureSlotId(slotId);
               handleTabChange('dashboard');
-            }}
+            } : undefined}
             onOpenWhatsAppModal={handleOpenWhatsAppModal}
+            onClearDateAttendance={handleClearDateAttendance}
+            onClearSession={handleClearSession}
           />
         )}
 
@@ -1427,8 +1471,12 @@ export default function App() {
             onUpdateSettings={(newSettings) => {
               notifyUserChange();
               setSettings(newSettings);
-              if (currentUser.role === 'hod' && newSettings.hodName !== currentUser.name) {
-                setCurrentUser(prev => prev ? { ...prev, name: newSettings.hodName } : null);
+              try {
+                localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(newSettings));
+              } catch (_) {}
+              if (currentUser.role === 'hod') {
+                const updatedName = newSettings.hodUsername || newSettings.hodName || currentUser.name;
+                setCurrentUser(prev => prev ? { ...prev, name: updatedName } : null);
               }
             }}
             onResetSettings={handleResetSettingsOnly}
@@ -1498,6 +1546,8 @@ export default function App() {
             onForceSyncCloud={handleForceSyncCloud}
             isCloudSyncing={cloudSyncing}
             sessions={sessions}
+            onClearDateAttendance={handleClearDateAttendance}
+            onClearSession={handleClearSession}
           />
         )}
 
@@ -1533,7 +1583,7 @@ export default function App() {
       {/* Footer */}
       <footer className="bg-white border-t border-slate-200 py-3.5 px-4 text-center text-xs text-slate-500">
         <p className="max-w-xl mx-auto leading-relaxed">
-          {settings.collegeName} &bull; {settings.departmentName} &bull; Real-time Attendance & Cloud ERP
+          {settings.collegeName} &bull; {settings.departmentName} &bull; Smart Attendance System
         </p>
       </footer>
     </div>
