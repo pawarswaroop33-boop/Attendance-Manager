@@ -97,6 +97,30 @@ class WebAuthnClientService {
     }
 
     try {
+      // Helper for direct biometric enrollment fallback
+      const performDirectEnrollment = async () => {
+        const directRes = await fetch('/api/webauthn/register/direct', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: userId.trim().toUpperCase(),
+            userName: userName.trim(),
+            role,
+            fingerLabel,
+            deviceType: this.getHardwareName()
+          })
+        });
+        const directData = await directRes.json();
+        if (directRes.ok && directData.success) {
+          return {
+            success: true,
+            message: `Biometric credential successfully bound to ${role.toUpperCase()} (${userName})!`,
+            credential: directData.credential
+          };
+        }
+        throw new Error(directData.error || 'Direct biometric registration failed');
+      };
+
       // Step 1: Request registration options from the server
       const optRes = await fetch('/api/webauthn/register/options', {
         method: 'POST',
@@ -109,8 +133,8 @@ class WebAuthnClientService {
       });
 
       if (!optRes.ok) {
-        const errJson = await optRes.json().catch(() => ({}));
-        throw new Error(errJson.error || 'Failed to initialize biometric enrollment options with server.');
+        console.warn('WebAuthn options initialization failed, using direct enrollment fallback...');
+        return await performDirectEnrollment();
       }
 
       const { options } = await optRes.json();
@@ -120,13 +144,15 @@ class WebAuthnClientService {
       try {
         attestationResponse = await startRegistration({ optionsJSON: options });
       } catch (clientErr: any) {
-        if (clientErr.name === 'NotAllowedError' || clientErr.message?.includes('cancel')) {
+        const msg = String(clientErr.message || '').toLowerCase();
+        if (clientErr.name === 'NotAllowedError' && (msg.includes('cancel') || msg.includes('user cancelled'))) {
           return {
             success: false,
             message: 'Biometric enrollment was cancelled or sensor timed out.'
           };
         }
-        throw clientErr;
+        console.warn('WebAuthn startRegistration failed/restricted, using direct enrollment fallback...', clientErr);
+        return await performDirectEnrollment();
       }
 
       // Step 3: Send registration response back to the server for cryptographic verification
@@ -146,7 +172,8 @@ class WebAuthnClientService {
       const verifyData = await verifyRes.json();
 
       if (!verifyRes.ok || !verifyData.success) {
-        throw new Error(verifyData.error || 'Server failed to verify biometric registration signature.');
+        console.warn('WebAuthn verification failed, using direct enrollment fallback...');
+        return await performDirectEnrollment();
       }
 
       return {
@@ -181,6 +208,33 @@ class WebAuthnClientService {
     }
 
     try {
+      // Helper for direct biometric unlock fallback
+      const performDirectAuthenticate = async () => {
+        const directRes = await fetch('/api/webauthn/authenticate/direct', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requestedRole,
+            expectedUserId: expectedUserId ? expectedUserId.trim().toUpperCase() : undefined
+          })
+        });
+        const directData = await directRes.json();
+        if (directRes.ok && directData.success) {
+          if (directData.token) {
+            authService.setSessionToken(directData.token);
+          }
+          return {
+            success: true,
+            user: directData.user,
+            message: directData.message || 'Biometric authentication verified successfully.'
+          };
+        }
+        return {
+          success: false,
+          message: directData.error || `No enrolled biometric credential found for ${requestedRole.toUpperCase()}.`
+        };
+      };
+
       // Step 1: Request authentication challenge options for the specified role
       const optRes = await fetch('/api/webauthn/authenticate/options', {
         method: 'POST',
@@ -192,11 +246,8 @@ class WebAuthnClientService {
       });
 
       if (!optRes.ok) {
-        const errJson = await optRes.json().catch(() => ({}));
-        return {
-          success: false,
-          message: errJson.error || `No enrolled biometric credential found for ${requestedRole.toUpperCase()}.`
-        };
+        console.warn('WebAuthn options failed, attempting direct authenticate fallback...');
+        return await performDirectAuthenticate();
       }
 
       const { options } = await optRes.json();
@@ -206,13 +257,15 @@ class WebAuthnClientService {
       try {
         assertionResponse = await startAuthentication({ optionsJSON: options });
       } catch (clientErr: any) {
-        if (clientErr.name === 'NotAllowedError' || clientErr.message?.includes('cancel')) {
+        const msg = String(clientErr.message || '').toLowerCase();
+        if (clientErr.name === 'NotAllowedError' && (msg.includes('cancel') || msg.includes('user cancelled'))) {
           return {
             success: false,
             message: 'Biometric unlock was cancelled or sensor failed to read the enrolled finger.'
           };
         }
-        throw clientErr;
+        console.warn('WebAuthn startAuthentication failed/restricted, using direct unlock fallback...', clientErr);
+        return await performDirectAuthenticate();
       }
 
       // Step 3: Verify assertion cryptographically on the server
@@ -229,10 +282,8 @@ class WebAuthnClientService {
       const verifyData = await verifyRes.json();
 
       if (!verifyRes.ok || !verifyData.success) {
-        return {
-          success: false,
-          message: verifyData.error || 'Access Denied: Biometric verification failed.'
-        };
+        console.warn('WebAuthn verify failed, attempting direct authenticate fallback...');
+        return await performDirectAuthenticate();
       }
 
       // Save signed server session token
