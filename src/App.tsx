@@ -84,9 +84,7 @@ export default function App() {
         return {
           ...parsed,
           collegeName: 'D.Y.PATIL TECHNCIAL CAMPUS',
-          departmentName: parsed.departmentName?.includes('Electronics')
-            ? 'Department Of Electronics And Computer Engineering'
-            : (parsed.departmentName || 'Department Of Electronics And Computer Engineering'),
+          departmentName: 'Department of Electronics And Computer Engineering',
           hodName: resolvedHodName,
           hodUsername: parsed.hodUsername || 'dyp',
           hodPasscode: (parsed.hodPasscode === 'DYP-HOD-2026' || !parsed.hodPasscode) ? 'dyp123' : parsed.hodPasscode

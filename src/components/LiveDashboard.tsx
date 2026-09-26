@@ -143,7 +143,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
     let unmarked = 0;
 
     classStudents.forEach(st => {
-      const rec = session.records[st.id];
+      const rec = session?.records?.[st.id];
       const status = rec?.status || 'unmarked';
       if (status === 'present') present++;
       else if (status === 'absent') absent++;
@@ -158,12 +158,12 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
     const lateRate = total > 0 ? Math.round((late / total) * 100) : 0;
 
     return { total, present, absent, late, excused, unmarked, presentRate, absentRate, lateRate };
-  }, [classStudents, session.records]);
+  }, [classStudents, session?.records]);
 
   // Filter students based on search and status
   const filteredStudents = useMemo(() => {
     return classStudents.filter(st => {
-      const rec = session.records[st.id];
+      const rec = session?.records?.[st.id];
       const status = rec?.status || 'unmarked';
 
       if (statusFilter !== 'all' && status !== statusFilter) {
@@ -180,11 +180,11 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
 
       return true;
     });
-  }, [classStudents, session.records, statusFilter, searchQuery]);
+  }, [classStudents, session?.records, statusFilter, searchQuery]);
 
   // Tapping student row toggles attendance (unmarked -> present -> absent -> present)
   const handleTogglePresent = (studentId: string) => {
-    const currentRec = session.records[studentId];
+    const currentRec = session?.records?.[studentId];
     const currentStatus = currentRec?.status || 'unmarked';
     let nextStatus: AttendanceStatus = 'present';
     if (currentStatus === 'present') {
@@ -207,7 +207,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
 
   const handleSetStatus = (studentId: string, status: AttendanceStatus, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    const currentRec = session.records[studentId];
+    const currentRec = session?.records?.[studentId];
     const currentStatus = currentRec?.status || 'unmarked';
     // If clicking the active status, toggle back to unmarked (blank)
     const nextStatus: AttendanceStatus = currentStatus === status ? 'unmarked' : status;
@@ -222,7 +222,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
 
   const handleSaveNote = () => {
     if (activeNoteStudentId) {
-      const currentRec = session.records[activeNoteStudentId];
+      const currentRec = session?.records?.[activeNoteStudentId];
       const status = currentRec?.status || 'unmarked';
       onUpdateRecord(activeNoteStudentId, status, noteText.trim() ? noteText.trim() : undefined);
       setActiveNoteStudentId(null);
@@ -318,8 +318,8 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
 
     // Automatically mark all un-entered students as absent
     classStudents.forEach(st => {
-      if (!enteredStudentIds.has(st.id) && session.records[st.id]?.status !== 'present') {
-        if (session.records[st.id]?.status !== 'absent') {
+      if (!enteredStudentIds.has(st.id) && session?.records?.[st.id]?.status !== 'present') {
+        if (session?.records?.[st.id]?.status !== 'absent') {
           onUpdateRecord(st.id, 'absent');
         }
       }
@@ -360,7 +360,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
   const handleSwitchToManualRoll = () => {
     setAttendanceMode('manual-roll');
     classStudents.forEach(st => {
-      const rec = session.records[st.id];
+      const rec = session?.records?.[st.id];
       if (!rec || rec.status === 'unmarked') {
         onUpdateRecord(st.id, 'absent');
       }
@@ -369,7 +369,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
 
   // Toggle roll number from 1-tap chip grid
   const handleToggleRollChip = (student: Student) => {
-    const currentRec = session.records[student.id];
+    const currentRec = session?.records?.[student.id];
     const currentStatus = currentRec?.status || 'absent';
     const nextStatus: AttendanceStatus = currentStatus === 'present' ? 'absent' : 'present';
     onUpdateRecord(student.id, nextStatus, currentRec?.note);
@@ -377,7 +377,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
     // Ensure all other un-entered students are marked absent automatically
     classStudents.forEach(st => {
       if (st.id !== student.id) {
-        const rec = session.records[st.id];
+        const rec = session?.records?.[st.id];
         if (!rec || rec.status === 'unmarked') {
           onUpdateRecord(st.id, 'absent');
         }
@@ -403,7 +403,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
   const handleMarkRemainingAbsent = () => {
     let count = 0;
     classStudents.forEach(st => {
-      const rec = session.records[st.id];
+      const rec = session?.records?.[st.id];
       if (!rec || rec.status === 'unmarked') {
         onUpdateRecord(st.id, 'absent');
         count++;

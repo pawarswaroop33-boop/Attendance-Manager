@@ -201,7 +201,7 @@ export const getSessionStats = (
   session: AttendanceSession,
   allStudents: Student[]
 ) => {
-  const records = session.records || {};
+  const records = session?.records || {};
   let presentCount = 0;
   let absentCount = 0;
   let lateCount = 0;

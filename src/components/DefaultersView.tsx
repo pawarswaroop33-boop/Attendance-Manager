@@ -122,7 +122,7 @@ export const DefaultersView: React.FC<DefaultersViewProps> = ({
       let attendedLectures = 0;
 
       relevantSessions.forEach(session => {
-        const record = session.records[student.id];
+        const record = session?.records?.[student.id];
         if (record && record.status !== 'unmarked') {
           totalLectures++;
           if (record.status === 'present') {
@@ -134,7 +134,7 @@ export const DefaultersView: React.FC<DefaultersViewProps> = ({
       });
 
       const percentage = totalLectures > 0 ? (attendedLectures / totalLectures) * 100 : 100;
-      const isDefaulter = percentage < threshold;
+      const isDefaulter = totalLectures > 0 && percentage < threshold;
 
       return {
         student,
@@ -152,7 +152,7 @@ export const DefaultersView: React.FC<DefaultersViewProps> = ({
   const defaultersList = useMemo(() => {
     return studentStats.filter(item => {
       if (!item.isDefaulter) return false;
-      if (selectedClassFilter !== 'all' && item.primaryClass.id !== selectedClassFilter) return false;
+      if (selectedClassFilter !== 'all' && item.primaryClass?.id !== selectedClassFilter) return false;
       if (defaulterSearchQuery.trim()) {
         const query = defaulterSearchQuery.toLowerCase();
         const matchesName = item.student.name.toLowerCase().includes(query);
@@ -221,7 +221,11 @@ export const DefaultersView: React.FC<DefaultersViewProps> = ({
 
     const formattedPhone = parentPhone.length === 10 ? `91${parentPhone}` : parentPhone;
     const url = `https://wa.me/${formattedPhone}?text=${encodeURIComponent(message)}`;
-    window.open(url, '_blank', 'noopener,noreferrer');
+    try {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (_) {
+      window.location.href = url;
+    }
   };
 
   // Defaulter WhatsApp Warning
@@ -240,7 +244,7 @@ export const DefaultersView: React.FC<DefaultersViewProps> = ({
       `This is to notify you regarding the attendance of your ward:\n\n` +
       `👤 *Student Name:* ${item.student.name}\n` +
       `📋 *Roll Number:* ${item.student.rollNo}\n` +
-      `🏫 *Class/Div:* ${item.primaryClass.name}\n` +
+      `🏫 *Class/Div:* ${item.primaryClass?.name || 'Class'}\n` +
       `📊 *Total Lectures Conducted:* ${item.totalLectures}\n` +
       `✅ *Lectures Attended:* ${item.attendedLectures}\n` +
       `⚠️ *Current Attendance:* ${item.percentage}%\n` +
@@ -256,7 +260,11 @@ export const DefaultersView: React.FC<DefaultersViewProps> = ({
     const url = `https://wa.me/${formattedPhone}?text=${encodeURIComponent(message)}`;
     
     setSentAlerts(prev => ({ ...prev, [item.student.id]: true }));
-    window.open(url, '_blank', 'noopener,noreferrer');
+    try {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (_) {
+      window.location.href = url;
+    }
   };
 
   // Export Single Session to CSV

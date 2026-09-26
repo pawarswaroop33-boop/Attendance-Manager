@@ -2,7 +2,7 @@ import { ClassGroup, Student, AttendanceSession, Teacher, Classroom, TimetableSl
 
 export const INITIAL_SETTINGS: SystemSettings = {
   collegeName: 'D.Y.PATIL TECHNCIAL CAMPUS',
-  departmentName: 'Department Of Electronics And Computer Engineering',
+  departmentName: 'Department of Electronics And Computer Engineering',
   hodName: 'Prof. Prashant Kathole',
   hodUsername: 'dyp',
   hodPasscode: 'dyp123',

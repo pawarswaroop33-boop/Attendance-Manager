@@ -530,8 +530,8 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
     let absentMarks = 0;
 
     sessions.forEach(sess => {
-      Object.values(sess.records).forEach(rec => {
-        if (rec.status !== 'unmarked') {
+      Object.values(sess?.records || {}).forEach(rec => {
+        if (rec && rec.status !== 'unmarked') {
           totalMarks++;
           if (rec.status === 'present') presentMarks++;
           else if (rec.status === 'absent') absentMarks++;
@@ -549,7 +549,7 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
       let stTotal = 0;
       let stAttended = 0;
       sessions.forEach(sess => {
-        const r = sess.records[st.id];
+        const r = sess?.records?.[st.id];
         if (r && r.status !== 'unmarked') {
           stTotal++;
           if (r.status === 'present') stAttended++;
@@ -582,7 +582,7 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
 
     const headers = ['Roll No', 'Student Name', 'Status', 'Date', 'Day', 'Subject', 'Time Slot', 'Teacher', 'Parent Phone'];
     const rows = targetStudents.map(st => {
-      const rec = session.records[st.id];
+      const rec = session?.records?.[st.id];
       const status = rec?.status || 'unmarked';
       return [
         st.rollNo,

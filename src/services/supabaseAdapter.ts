@@ -657,8 +657,10 @@ export class SupabaseDatabaseAdapter implements CampusDatabaseAdapter {
     if (!this.client) return () => {};
 
     try {
+      // Use unique channel topic ID so re-subscriptions/re-renders always get a clean, unsubscribed channel instance
+      const channelTopic = `campus-live-sync-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
       const channel = this.client
-        .channel('campus-live-sync')
+        .channel(channelTopic)
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'campus_state' },
@@ -669,17 +671,20 @@ export class SupabaseDatabaseAdapter implements CampusDatabaseAdapter {
             }
           }
         )
-        .subscribe();
+        .subscribe((status, err) => {
+          if (err) {
+            // Silently handle realtime subscription error without throwing warning noise
+          }
+        });
 
       return () => {
         try {
-          if (this.client) {
+          if (this.client && channel) {
             this.client.removeChannel(channel);
           }
         } catch (_) {}
       };
-    } catch (err) {
-      console.warn('[Supabase] Realtime subscription error:', err);
+    } catch (_) {
       return () => {};
     }
   }

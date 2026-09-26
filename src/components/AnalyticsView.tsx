@@ -71,7 +71,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       let excusedDays = 0;
 
       classSessions.forEach(session => {
-        const record = session.records[student.id];
+        const record = session?.records?.[student.id];
         const status = record?.status || 'absent';
 
         if (status === 'present') presentDays++;
@@ -82,7 +82,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
 
       // Attendance rate formula: (present + late + excused) / totalSessions
       const attended = presentDays + lateDays + excusedDays;
-      const rate = totalSessions > 0 ? Math.round((attended / totalSessions) * 100) : 0;
+      const rate = totalSessions > 0 ? Math.round((attended / totalSessions) * 100) : 100;
 
       return {
         student,
@@ -98,7 +98,9 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
 
   // Class summary statistics
   const summaryKPIs = useMemo(() => {
-    if (studentStats.length === 0) return { avgRate: 0, defaultersCount: 0, starsCount: 0, totalRecords: 0 };
+    if (studentStats.length === 0 || classSessions.length === 0) {
+      return { avgRate: 0, defaultersCount: 0, starsCount: 0, totalRecords: 0 };
+    }
 
     const totalRate = studentStats.reduce((acc, s) => acc + s.rate, 0);
     const avgRate = Math.round(totalRate / studentStats.length);
@@ -116,7 +118,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       const total = classStudents.length;
 
       classStudents.forEach(st => {
-        const rec = session.records[st.id];
+        const rec = session?.records?.[st.id];
         if (rec?.status === 'present' || rec?.status === 'late' || rec?.status === 'excused') {
           present++;
         }
@@ -558,8 +560,8 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
             </div>
           ) : (
             filteredStudentStats.map(({ student, presentDays, absentDays, lateDays, rate, totalSessions }) => {
-              const isDefaulter = rate < 75;
-              const isStar = rate >= 95;
+              const isDefaulter = totalSessions > 0 && rate < 75;
+              const isStar = totalSessions > 0 && rate >= 95;
 
               return (
                 <div key={student.id} className="p-3.5 space-y-3">
@@ -604,7 +606,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-slate-500 font-medium">Attendance Rate</span>
                       <span className={`font-bold ${isDefaulter ? 'text-rose-700' : isStar ? 'text-emerald-700' : 'text-slate-800'}`}>
-                        {rate}%
+                        {totalSessions > 0 ? `${rate}%` : 'No sessions'}
                       </span>
                     </div>
                     <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
@@ -612,7 +614,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                         className={`h-full rounded-full ${
                           isDefaulter ? 'bg-rose-600' : isStar ? 'bg-emerald-600' : 'bg-slate-700'
                         }`}
-                        style={{ width: `${rate}%` }}
+                        style={{ width: `${totalSessions > 0 ? rate : 0}%` }}
                       ></div>
                     </div>
                   </div>
@@ -689,8 +691,8 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                 </tr>
               ) : (
                 filteredStudentStats.map(({ student, presentDays, absentDays, lateDays, rate, totalSessions }) => {
-                  const isDefaulter = rate < 75;
-                  const isStar = rate >= 95;
+                  const isDefaulter = totalSessions > 0 && rate < 75;
+                  const isStar = totalSessions > 0 && rate >= 95;
 
                   return (
                     <tr key={student.id} className="hover:bg-slate-50/80 transition-colors">
@@ -718,13 +720,13 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                               className={`h-full rounded-full ${
                                 isDefaulter ? 'bg-rose-600' : isStar ? 'bg-emerald-600' : 'bg-slate-700'
                               }`}
-                              style={{ width: `${rate}%` }}
+                              style={{ width: `${totalSessions > 0 ? rate : 0}%` }}
                             ></div>
                           </div>
                           <span className={`font-bold text-xs ${
                             isDefaulter ? 'text-rose-700' : isStar ? 'text-emerald-700' : 'text-slate-800'
                           }`}>
-                            {rate}%
+                            {totalSessions > 0 ? `${rate}%` : 'N/A'}
                           </span>
                         </div>
                       </td>

@@ -83,7 +83,7 @@ export const TimetableLectureSelector: React.FC<TimetableLectureSelectorProps> =
       return { isMarked: false, count: 0, total: 0 };
     }
 
-    const records = Object.values(session.records);
+    const records = Object.values(session?.records || {});
     const markedCount = records.filter(r => r.status === 'present').length;
     return { isMarked: true, count: markedCount, total: records.length };
   };

@@ -934,7 +934,7 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                              {Object.entries(session.records).map(([stId, rec]) => {
+                              {Object.entries(session?.records || {}).map(([stId, rec]) => {
                                 const st = students.find(s => s.id === stId);
                                 if (!st) return null;
                                 const isPresent = rec.status === 'present';

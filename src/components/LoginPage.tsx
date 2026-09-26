@@ -253,7 +253,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         {/* Department Name Badge */}
         <div className="flex items-center justify-center gap-1.5 mb-3.5 text-[10px] sm:text-[11.5px] text-sky-900 font-bold bg-gradient-to-r from-sky-50 via-blue-50 to-sky-50 py-1.5 px-3.5 rounded-full border border-sky-200/90 mx-auto max-w-full text-center shadow-xs">
           <GraduationCap className="w-3.5 h-3.5 text-sky-600 shrink-0" />
-          <span className="font-bold tracking-tight">Department Of Electronics And Computer Engineering</span>
+          <span className="font-bold tracking-tight">Department of Electronics And Computer Engineering</span>
         </div>
 
         {/* Role Switcher with Smooth Sliding Indicator & Tactile 3D Buttons */}
@@ -440,7 +440,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       {/* Footer Tagline */}
       <footer className="mt-5 text-center text-[11px] text-slate-400 font-medium flex items-center justify-center gap-1.5">
         <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-        <span>&copy; {new Date().getFullYear()} {settings.departmentName} &bull; Protected Access</span>
+        <span>&copy; {new Date().getFullYear()} Department of Electronics And Computer Engineering &bull; Protected Access</span>
       </footer>
 
     </div>
