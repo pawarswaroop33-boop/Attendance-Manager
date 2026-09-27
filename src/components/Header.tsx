@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useState, useLayoutEffect } from 'react';
 import { 
   Calendar, 
   ChevronDown, 
@@ -65,6 +65,44 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const currentClass = classes.find(c => c.id === selectedClassId) || classes[0];
 
+  const navRef = useRef<HTMLElement>(null);
+  const [pillStyle, setPillStyle] = useState<{ left: number; width: number; height: number; top: number; opacity: number }>({
+    left: 0,
+    width: 0,
+    height: 0,
+    top: 0,
+    opacity: 0,
+  });
+
+  const syncPillToElement = (btn: HTMLElement | null) => {
+    if (!btn || !navRef.current) return;
+    setPillStyle({
+      left: btn.offsetLeft,
+      width: btn.offsetWidth,
+      height: btn.offsetHeight,
+      top: btn.offsetTop,
+      opacity: 1,
+    });
+  };
+
+  useLayoutEffect(() => {
+    const updatePill = () => {
+      if (!navRef.current) return;
+      const activeBtn = navRef.current.querySelector<HTMLButtonElement>(`[data-tab-id="${currentTab}"]`);
+      syncPillToElement(activeBtn);
+    };
+
+    updatePill();
+    window.addEventListener('resize', updatePill);
+    return () => window.removeEventListener('resize', updatePill);
+  }, [currentTab, currentUser.role]);
+
+  const handleTabSelect = (tab: AppTab, e?: React.MouseEvent<HTMLButtonElement>) => {
+    if (e?.currentTarget) {
+      syncPillToElement(e.currentTarget);
+    }
+    onTabChange(tab);
+  };
 
   const handleSetToday = () => {
     const today = new Date();
@@ -78,11 +116,13 @@ export const Header: React.FC<HeaderProps> = ({
   const totalAbsent = Math.max(0, totalStudents - totalPresent);
 
   return (
-    <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-xs">
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+    <header className="bg-white/95 backdrop-blur-md border-b border-slate-200/90 sticky top-0 z-30 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
+      <div className={`mx-auto px-3 sm:px-6 lg:px-8 pb-3 sm:pb-3.5 pt-1.5 transition-all duration-200 ${
+        currentTab === 'hod' ? 'max-w-[1680px]' : 'max-w-7xl'
+      }`}>
         
         {/* Top Header Row: Identity & Quick Actions */}
-        <div className="py-2 sm:py-3 flex items-center justify-between gap-2">
+        <div className="py-2 sm:py-2.5 flex items-center justify-between gap-2">
           
           {/* Brand / Campus Identity */}
           <div className="flex items-center gap-2.5 min-w-0 flex-1">
@@ -138,7 +178,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Secondary Header Row: Class, Date, and Live Stats */}
-        <div className="pb-2.5 pt-1 grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center">
+        <div className="pb-2.5 pt-0.5 grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center">
           
           {/* Class Selector Dropdown */}
           <div className="sm:col-span-4 relative">
@@ -194,109 +234,136 @@ export const Header: React.FC<HeaderProps> = ({
 
         </div>
 
-        {/* Navigation Tabs Bar - Clean swipeable tabs */}
-        <nav className="flex items-center gap-1.5 sm:gap-2 border-t border-slate-100 pt-1.5 pb-2 overflow-x-auto no-scrollbar w-full max-w-full scroll-smooth">
+        {/* Navigation Tabs Bar - Smooth animated segmented track with glassmorphism sliding 3D pill */}
+        <nav 
+          ref={navRef}
+          className="nav-glass-track relative flex items-center gap-1 sm:gap-1.5 mt-2 mb-0.5 overflow-x-auto no-scrollbar w-full max-w-full scroll-smooth bg-slate-100/90 p-1.5 rounded-2xl border border-slate-200/90 shadow-[inset_0_2px_5px_rgba(0,0,0,0.05),0_1px_0_rgba(255,255,255,0.9)]"
+        >
+          {/* Animated Sliding Glassmorphism 3D Pill Indicator */}
+          <div
+            style={{
+              transform: `translate3d(${pillStyle.left}px, ${pillStyle.top}px, 0)`,
+              width: `${pillStyle.width}px`,
+              height: `${pillStyle.height}px`,
+              opacity: pillStyle.opacity,
+            }}
+            className={`absolute top-0 left-0 rounded-xl transition-all duration-200 ease-[cubic-bezier(0.2,0.9,0.3,1)] pointer-events-none will-change-transform ${
+              currentTab === 'hod'
+                ? 'pill-glassmorphism-amber'
+                : 'pill-glassmorphism'
+            }`}
+          />
           
           {/* HOD Center Tab (Only for HOD - Main Hub) */}
           {currentUser.role === 'hod' && (
             <button
               id="tab-hod"
+              data-tab-id="hod"
               type="button"
-              onClick={() => onTabChange('hod')}
-              className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-black rounded-xl transition-all whitespace-nowrap cursor-pointer shrink-0 min-h-[38px] ${
+              onClick={(e) => handleTabSelect('hod', e)}
+              className={`group relative z-10 flex items-center gap-2 px-3.5 sm:px-4 py-2 text-xs font-bold rounded-xl whitespace-nowrap cursor-pointer shrink-0 min-h-[38px] select-none outline-none focus:outline-none focus:ring-0 ${
                 currentTab === 'hod'
-                  ? 'bg-gradient-to-b from-amber-400 to-amber-500 text-slate-950 border border-amber-600/40 shadow-[0_2px_8px_rgba(245,158,11,0.4),inset_0_1px_0_rgba(255,255,255,0.4)]'
-                  : 'text-amber-950 bg-gradient-to-b from-amber-50 to-amber-100/70 hover:to-amber-100 border border-amber-300/80 shadow-xs hover:shadow-sm active:translate-y-0.5'
+                  ? 'nav-tab-btn-active text-amber-950 font-bold'
+                  : 'nav-tab-btn text-amber-900/80 hover:text-amber-950'
               }`}
             >
-              <ShieldCheck className="w-4 h-4 text-amber-700" />
+              <ShieldCheck className={`w-4 h-4 transition-transform duration-200 ${currentTab === 'hod' ? 'text-amber-950 scale-105' : 'text-amber-700 group-hover:scale-110'}`} />
               <span>HOD Center</span>
             </button>
           )}
 
-          {/* Teacher Attendance Tab (ONLY for Faculty/Teachers - HOD does NOT take attendance) */}
+          {/* Teacher Attendance Tab (ONLY for Faculty/Teachers) */}
           {currentUser.role === 'teacher' && (
             <button
               id="tab-dashboard"
+              data-tab-id="dashboard"
               type="button"
-              onClick={() => onTabChange('dashboard')}
-              className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap cursor-pointer shrink-0 min-h-[38px] ${
+              onClick={(e) => handleTabSelect('dashboard', e)}
+              className={`group relative z-10 flex items-center gap-2 px-3.5 sm:px-4 py-2 text-xs font-bold rounded-xl whitespace-nowrap cursor-pointer shrink-0 min-h-[38px] select-none outline-none focus:outline-none focus:ring-0 ${
                 currentTab === 'dashboard'
-                  ? 'bg-slate-900 text-white shadow-[0_2px_6px_rgba(15,23,42,0.35),inset_0_1px_0_rgba(255,255,255,0.15)] border border-slate-950'
-                  : 'text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200/90 shadow-xs hover:shadow-sm active:translate-y-0.5'
+                  ? 'nav-tab-btn-active text-slate-900 font-bold'
+                  : 'nav-tab-btn text-slate-600 hover:text-slate-900'
               }`}
             >
-              <LayoutDashboard className="w-3.5 h-3.5" />
+              <LayoutDashboard className={`w-3.5 h-3.5 transition-transform duration-200 ${currentTab === 'dashboard' ? 'text-emerald-600 scale-105' : 'text-slate-400 group-hover:text-emerald-600 group-hover:scale-110'}`} />
               <span>Take Attendance</span>
             </button>
           )}
 
+          {/* Attendance Log Tab */}
           <button
             id="tab-defaulters"
+            data-tab-id="defaulters"
             type="button"
-            onClick={() => onTabChange('defaulters')}
-            className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap cursor-pointer shrink-0 min-h-[38px] ${
+            onClick={(e) => handleTabSelect('defaulters', e)}
+            className={`group relative z-10 flex items-center gap-2 px-3.5 sm:px-4 py-2 text-xs font-bold rounded-xl whitespace-nowrap cursor-pointer shrink-0 min-h-[38px] select-none outline-none focus:outline-none focus:ring-0 ${
               currentTab === 'defaulters'
-                ? 'bg-slate-900 text-white shadow-[0_2px_6px_rgba(15,23,42,0.35),inset_0_1px_0_rgba(255,255,255,0.15)] border border-slate-950'
-                : 'text-slate-700 bg-gradient-to-b from-white to-slate-50 hover:to-slate-100 border border-slate-200/90 shadow-xs hover:shadow-sm active:translate-y-0.5'
+                ? 'nav-tab-btn-active text-slate-900 font-bold'
+                : 'nav-tab-btn text-slate-600 hover:text-slate-900'
             }`}
             title="Attendance Log & Defaulters Register"
           >
-            <ClipboardList className={`w-3.5 h-3.5 ${currentTab === 'defaulters' ? 'text-emerald-400' : 'text-slate-500'}`} />
+            <ClipboardList className={`w-3.5 h-3.5 transition-transform duration-200 ${currentTab === 'defaulters' ? 'text-emerald-600 scale-105' : 'text-slate-400 group-hover:text-emerald-600 group-hover:scale-110'}`} />
             <span>Attendance Log</span>
             {defaultersCount > 0 && (
-              <span className={`text-[10px] font-extrabold px-1.5 py-0.2 rounded-full ${
-                currentTab === 'defaulters' ? 'bg-rose-500 text-white' : 'bg-rose-100 text-rose-700'
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full transition-all duration-200 ${
+                currentTab === 'defaulters' ? 'bg-rose-500 text-white shadow-xs' : 'bg-rose-100 text-rose-700 group-hover:bg-rose-200/80'
               }`}>
                 {defaultersCount}
               </span>
             )}
           </button>
 
+          {/* Timetable Tab */}
           <button
             id="tab-timetable"
+            data-tab-id="timetable"
             type="button"
-            onClick={() => onTabChange('timetable')}
-            className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap cursor-pointer shrink-0 min-h-[38px] ${
+            onClick={(e) => handleTabSelect('timetable', e)}
+            className={`group relative z-10 flex items-center gap-2 px-3.5 sm:px-4 py-2 text-xs font-bold rounded-xl whitespace-nowrap cursor-pointer shrink-0 min-h-[38px] select-none outline-none focus:outline-none focus:ring-0 ${
               currentTab === 'timetable'
-                ? 'bg-slate-900 text-white shadow-[0_2px_6px_rgba(15,23,42,0.35),inset_0_1px_0_rgba(255,255,255,0.15)] border border-slate-950'
-                : 'text-slate-700 bg-gradient-to-b from-white to-slate-50 hover:to-slate-100 border border-slate-200/90 shadow-xs hover:shadow-sm active:translate-y-0.5'
+                ? 'nav-tab-btn-active text-slate-900 font-bold'
+                : 'nav-tab-btn text-slate-600 hover:text-slate-900'
             }`}
           >
-            <Clock className="w-3.5 h-3.5 text-sky-500" />
+            <Clock className={`w-3.5 h-3.5 transition-transform duration-200 ${currentTab === 'timetable' ? 'text-sky-600 scale-105' : 'text-slate-400 group-hover:text-sky-600 group-hover:scale-110'}`} />
             <span>Timetable</span>
           </button>
 
+          {/* Students Roster Tab */}
           <button
             id="tab-students"
+            data-tab-id="students"
             type="button"
-            onClick={() => onTabChange('students')}
-            className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap cursor-pointer shrink-0 min-h-[38px] ${
+            onClick={(e) => handleTabSelect('students', e)}
+            className={`group relative z-10 flex items-center gap-2 px-3.5 sm:px-4 py-2 text-xs font-bold rounded-xl whitespace-nowrap cursor-pointer shrink-0 min-h-[38px] select-none outline-none focus:outline-none focus:ring-0 ${
               currentTab === 'students'
-                ? 'bg-slate-900 text-white shadow-[0_2px_6px_rgba(15,23,42,0.35),inset_0_1px_0_rgba(255,255,255,0.15)] border border-slate-950'
-                : 'text-slate-700 bg-gradient-to-b from-white to-slate-50 hover:to-slate-100 border border-slate-200/90 shadow-xs hover:shadow-sm active:translate-y-0.5'
+                ? 'nav-tab-btn-active text-slate-900 font-bold'
+                : 'nav-tab-btn text-slate-600 hover:text-slate-900'
             }`}
           >
-            <Users className="w-3.5 h-3.5" />
+            <Users className={`w-3.5 h-3.5 transition-transform duration-200 ${currentTab === 'students' ? 'text-indigo-600 scale-105' : 'text-slate-400 group-hover:text-indigo-600 group-hover:scale-110'}`} />
             <span>Students</span>
-            <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded-md ${
-              currentTab === 'students' ? 'bg-slate-800 text-slate-200' : 'bg-slate-200 text-slate-700'
+            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md transition-all duration-200 ${
+              currentTab === 'students' ? 'bg-slate-200/90 text-slate-800 border border-slate-300/80 shadow-xs' : 'bg-slate-200/60 text-slate-600 group-hover:bg-slate-200'
             }`}>
               {currentClass.studentIds.length}
             </span>
           </button>
 
+          {/* Analytics Tab */}
           <button
             id="tab-analytics"
+            data-tab-id="analytics"
             type="button"
-            onClick={() => onTabChange('analytics')}
-            className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap cursor-pointer shrink-0 min-h-[38px] ${
+            onClick={(e) => handleTabSelect('analytics', e)}
+            className={`group relative z-10 flex items-center gap-2 px-3.5 sm:px-4 py-2 text-xs font-bold rounded-xl whitespace-nowrap cursor-pointer shrink-0 min-h-[38px] select-none outline-none focus:outline-none focus:ring-0 ${
               currentTab === 'analytics'
-                ? 'bg-slate-900 text-white shadow-[0_2px_6px_rgba(15,23,42,0.35),inset_0_1px_0_rgba(255,255,255,0.15)] border border-slate-950'
-                : 'text-slate-700 bg-gradient-to-b from-white to-slate-50 hover:to-slate-100 border border-slate-200/90 shadow-xs hover:shadow-sm active:translate-y-0.5'
+                ? 'nav-tab-btn-active text-slate-900 font-bold'
+                : 'nav-tab-btn text-slate-600 hover:text-slate-900'
             }`}
           >
-            <BarChart3 className="w-3.5 h-3.5" />
+            <BarChart3 className={`w-3.5 h-3.5 transition-transform duration-200 ${currentTab === 'analytics' ? 'text-emerald-600 scale-105' : 'text-slate-400 group-hover:text-emerald-600 group-hover:scale-110'}`} />
             <span>Analytics</span>
           </button>
 
@@ -305,10 +372,10 @@ export const Header: React.FC<HeaderProps> = ({
               id="open-scanner-button"
               type="button"
               onClick={onOpenImportModal}
-              className="flex items-center gap-1.5 text-xs font-bold text-emerald-900 bg-gradient-to-b from-emerald-50 to-emerald-100 hover:to-emerald-200/80 border border-emerald-300/90 px-3.5 py-2 rounded-xl shadow-xs hover:shadow-sm active:translate-y-0.5 transition-all cursor-pointer shrink-0 min-h-[38px] btn-tactile"
+              className="relative z-10 flex items-center gap-1.5 text-xs font-bold text-emerald-950 bg-gradient-to-b from-emerald-100 to-emerald-200 hover:to-emerald-300 border border-emerald-400/80 px-3.5 py-2 rounded-xl shadow-xs hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 active:scale-95 transition-all duration-200 cursor-pointer shrink-0 min-h-[38px] btn-tactile"
               title="Import Excel or PDF student roster"
             >
-              <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+              <Sparkles className="w-3.5 h-3.5 text-emerald-700 animate-pulse" />
               <span>Scan List</span>
             </button>
           )}

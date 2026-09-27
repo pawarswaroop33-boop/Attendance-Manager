@@ -49,20 +49,47 @@ export const formatDateKey = (year: number, monthIndex: number, day: number): st
 };
 
 /**
+ * Returns true if a given YYYY-MM-DD date is strictly in the past (before today)
+ */
+export const isPastDate = (dateStr: string): boolean => {
+  if (!dateStr) return false;
+  return dateStr < getTodayDateStr();
+};
+
+/**
+ * Returns true if a given YYYY-MM-DD date is strictly in the future (after today)
+ */
+export const isFutureDate = (dateStr: string): boolean => {
+  if (!dateStr) return false;
+  return dateStr > getTodayDateStr();
+};
+
+/**
+ * Checks if a scheduled slot on a given date is an Off Lecture.
+ * A lecture is an Off Lecture if the date has passed and attendance was not recorded.
+ */
+export const isOffLecture = (
+  dateStr: string,
+  hasRecordedSession: boolean,
+  holiday: Holiday | null = null
+): boolean => {
+  if (!dateStr) return false;
+  if (holiday) return false; // Handled as an official holiday
+  if (!isPastDate(dateStr)) return false; // Not in the past
+  return !hasRecordedSession;
+};
+
+/**
  * A session is considered a valid recorded attendance session if and only if:
  * 1. It is a valid session object.
  * 2. It has been explicitly registered/saved by a user (isRealSession === true || isRegistered === true)
  *    OR it has at least 1 student marked with a status other than 'unmarked' (present, absent, late, excused).
  * 3. It contains no dummy, mock, or auto-generated template indicators.
+ * 4. Its date is not in the future.
  */
 export const isValidRecordedSession = (session: any): boolean => {
   if (!session || typeof session !== 'object') return false;
   if (session.isDummy === true) return false;
-
-  // Reject any session with a future date
-  if (session.date && session.date > getTodayDateStr()) {
-    return false;
-  }
 
   const id = String(session.id || '').toLowerCase();
   const name = String(session.sessionName || '').toLowerCase();

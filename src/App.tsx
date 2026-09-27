@@ -732,11 +732,6 @@ export default function App() {
 
   // Real-time Update individual record (ticking checkbox, setting absent, late, or adding note)
   const handleUpdateRecord = useCallback((studentId: string, status: AttendanceStatus, note?: string) => {
-    const todayStr = getTodayDateStr();
-    if (selectedDate > todayStr) {
-      showToast("Cannot record attendance: Selected date is in the future.", "error");
-      return;
-    }
     if (currentUser?.role === 'teacher' && !hasLectureOnSelectedDate) {
       showToast("Cannot record attendance: You have no scheduled lectures on this date.", "error");
       return;
@@ -828,11 +823,6 @@ export default function App() {
 
   // Batch update (All Present, All Absent, or Clear All)
   const handleBatchUpdate = useCallback((status: AttendanceStatus) => {
-    const todayStr = getTodayDateStr();
-    if (selectedDate > todayStr) {
-      showToast("Cannot record attendance: Selected date is in the future.", "error");
-      return;
-    }
     if (currentUser?.role === 'teacher' && !hasLectureOnSelectedDate) {
       showToast("Cannot record attendance: You have no scheduled lectures on this date.", "error");
       return;
@@ -1525,13 +1515,13 @@ export default function App() {
       />
 
       {/* Main Content Area */}
-      <main className={`flex-1 w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 min-w-0 ${
+      <main className={`flex-1 w-full mx-auto px-3 sm:px-6 lg:px-8 pt-5 pb-8 sm:pt-7 sm:pb-12 min-w-0 ${
         currentTab === 'hod' ? 'max-w-[1680px]' : 'max-w-7xl'
       }`}>
         
         {/* VIEW 1: MARK ATTENDANCE */}
         {currentTab === 'dashboard' && (
-          <div className="space-y-6">
+          <div key="view-dashboard" className="animate-blur-clear space-y-6">
             <LiveDashboard
               session={currentSession}
               currentClass={currentClass}
@@ -1566,7 +1556,7 @@ export default function App() {
 
         {/* VIEW 2: TIMETABLE & LECTURE SCHEDULE (Req 11, 13) */}
         {currentTab === 'timetable' && (
-          <div className="space-y-6">
+          <div key="view-timetable" className="animate-blur-clear space-y-6">
             <TimetableLectureSelector
               timetable={timetable}
               sessions={sessions}
@@ -1575,89 +1565,153 @@ export default function App() {
               onDateChange={setSelectedDate}
               onSelectLecture={handleSelectLecture}
               activeLectureSlotId={activeLectureSlotId}
+              teachers={teachers}
+              classrooms={classrooms}
+              classes={classes}
+              onUpdateTimetableSlot={(updatedSlot) => {
+                notifyUserChange();
+                const next = timetable.map(s => s.id === updatedSlot.id ? updatedSlot : s);
+                setTimetable(next);
+                try {
+                  localStorage.setItem(STORAGE_KEY_TIMETABLE, JSON.stringify(next));
+                } catch (_) {}
+                dbService.saveEntireCampusState({
+                  settings,
+                  classes,
+                  students,
+                  teachers,
+                  classrooms,
+                  timetable: next,
+                  sessions
+                }).catch(console.warn);
+                showToast(`Timetable lecture "${updatedSlot.subject}" updated.`, 'success');
+              }}
+              onAddTimetableSlot={(newSlot) => {
+                notifyUserChange();
+                const next = [...timetable, newSlot];
+                setTimetable(next);
+                try {
+                  localStorage.setItem(STORAGE_KEY_TIMETABLE, JSON.stringify(next));
+                } catch (_) {}
+                dbService.saveEntireCampusState({
+                  settings,
+                  classes,
+                  students,
+                  teachers,
+                  classrooms,
+                  timetable: next,
+                  sessions
+                }).catch(console.warn);
+                showToast(`Lecture "${newSlot.subject}" scheduled.`, 'success');
+              }}
+              onDeleteTimetableSlot={(slotId) => {
+                notifyUserChange();
+                const next = timetable.filter(s => s.id !== slotId);
+                setTimetable(next);
+                try {
+                  localStorage.setItem(STORAGE_KEY_TIMETABLE, JSON.stringify(next));
+                } catch (_) {}
+                dbService.saveEntireCampusState({
+                  settings,
+                  classes,
+                  students,
+                  teachers,
+                  classrooms,
+                  timetable: next,
+                  sessions
+                }).catch(console.warn);
+                showToast('Timetable lecture removed.', 'info');
+              }}
             />
           </div>
         )}
 
         {/* VIEW 3: TAKEN ATTENDANCE REGISTER & DEFAULTERS (Req 15, 16) */}
         {currentTab === 'defaulters' && (
-          <DefaultersView
-            students={students}
-            classes={classes}
-            sessions={sessions}
-            settings={settings}
-            onUpdateThreshold={(val) => setSettings(prev => ({ ...prev, defaulterThreshold: val }))}
-            userRole={currentUser.role}
-            currentUser={currentUser}
-            timetable={timetable}
-            onNavigateToSession={currentUser.role === 'teacher' ? (classId, date, slotId) => {
-              setSelectedClassId(classId);
-              setSelectedDate(date);
-              setActiveLectureSlotId(slotId);
-              handleTabChange('dashboard');
-            } : undefined}
-            onOpenWhatsAppModal={handleOpenWhatsAppModal}
-            onClearDateAttendance={handleClearDateAttendance}
-            onClearSession={handleClearSession}
-            holidays={holidays}
-            onDeclareHoliday={handleDeclareHoliday}
-            onRemoveHoliday={handleRemoveHoliday}
-          />
+          <div key="view-defaulters" className="animate-blur-clear space-y-6">
+            <DefaultersView
+              students={students}
+              classes={classes}
+              sessions={sessions}
+              settings={settings}
+              onUpdateThreshold={(val) => setSettings(prev => ({ ...prev, defaulterThreshold: val }))}
+              userRole={currentUser.role}
+              currentUser={currentUser}
+              timetable={timetable}
+              onNavigateToSession={currentUser.role === 'teacher' ? (classId, date, slotId) => {
+                setSelectedClassId(classId);
+                setSelectedDate(date);
+                setActiveLectureSlotId(slotId);
+                handleTabChange('dashboard');
+              } : undefined}
+              onOpenWhatsAppModal={handleOpenWhatsAppModal}
+              onClearDateAttendance={handleClearDateAttendance}
+              onClearSession={handleClearSession}
+              holidays={holidays}
+              onDeclareHoliday={handleDeclareHoliday}
+              onRemoveHoliday={handleRemoveHoliday}
+            />
+          </div>
         )}
 
         {/* VIEW 4: CAMPUS ANALYTICS (Req 8) */}
         {currentTab === 'analytics' && (
-          <AnalyticsView
-            sessions={sessions}
-            currentClass={currentClass}
-            students={students}
-            onOpenWhatsApp={handleOpenWhatsAppModal}
-            currentUser={currentUser}
-            timetable={timetable}
-          />
+          <div key="view-analytics" className="animate-blur-clear space-y-6">
+            <AnalyticsView
+              sessions={sessions}
+              currentClass={currentClass}
+              students={students}
+              onOpenWhatsApp={handleOpenWhatsAppModal}
+              currentUser={currentUser}
+              timetable={timetable}
+            />
+          </div>
         )}
 
         {/* VIEW 5: STUDENTS ROSTER (Req 10) */}
         {currentTab === 'students' && (
-          <StudentManagement
-            currentClass={currentClass}
-            students={students}
-            onAddStudent={handleAddStudent}
-            onUpdateStudent={handleUpdateStudent}
-            onRemoveStudentFromClass={handleRemoveStudentFromClass}
-            onDeleteStudentPermanently={handleDeleteStudentPermanently}
-            onDeleteAllStudents={currentUser?.role === 'hod' ? handleDeleteAllStudents : undefined}
-            onOpenImportModal={currentUser?.role === 'hod' ? handleOpenImportModal : undefined}
-            currentUser={currentUser}
-          />
+          <div key="view-students" className="animate-blur-clear space-y-6">
+            <StudentManagement
+              currentClass={currentClass}
+              students={students}
+              onAddStudent={handleAddStudent}
+              onUpdateStudent={handleUpdateStudent}
+              onRemoveStudentFromClass={handleRemoveStudentFromClass}
+              onDeleteStudentPermanently={handleDeleteStudentPermanently}
+              onDeleteAllStudents={currentUser?.role === 'hod' ? handleDeleteAllStudents : undefined}
+              onOpenImportModal={currentUser?.role === 'hod' ? handleOpenImportModal : undefined}
+              currentUser={currentUser}
+            />
+          </div>
         )}
 
         {/* VIEW 6: HOD CONTROL CENTER (Req 6, 8, 9, 11, 12) */}
         {currentTab === 'hod' && currentUser.role === 'hod' && (
-          <HodControlCenter
-            settings={settings}
-            onUpdateSettings={(newSettings) => {
-              notifyUserChange();
-              setSettings(newSettings);
-              try {
-                localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(newSettings));
-              } catch (_) {}
-              if (currentUser.role === 'hod') {
-                const updatedName = newSettings.hodUsername || newSettings.hodName || currentUser.name;
-                setCurrentUser(prev => prev ? { ...prev, name: updatedName } : null);
-              }
-            }}
-            onResetSettings={handleResetSettingsOnly}
-            teachers={teachers}
-            onAddTeacher={(t) => {
-              notifyUserChange();
-              const next = [...teachers, t];
-              setTeachers(next);
-              try {
-                localStorage.setItem(STORAGE_KEY_TEACHERS, JSON.stringify(next));
-              } catch (_) {}
-              dbService.saveEntireCampusState({
-                settings,
+          <div key="view-hod" className="animate-blur-clear space-y-6">
+            <HodControlCenter
+              settings={settings}
+              onUpdateSettings={(newSettings) => {
+                notifyUserChange();
+                setSettings(newSettings);
+                try {
+                  localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(newSettings));
+                } catch (_) {}
+                if (currentUser.role === 'hod') {
+                  const updatedName = newSettings.hodUsername || newSettings.hodName || currentUser.name;
+                  setCurrentUser(prev => prev ? { ...prev, name: updatedName } : null);
+                }
+              }}
+              onResetSettings={handleResetSettingsOnly}
+              teachers={teachers}
+              onAddTeacher={(t) => {
+                notifyUserChange();
+                const next = [...teachers, t];
+                setTeachers(next);
+                try {
+                  localStorage.setItem(STORAGE_KEY_TEACHERS, JSON.stringify(next));
+                } catch (_) {}
+                dbService.saveEntireCampusState({
+                  settings,
                 classes,
                 students,
                 teachers: next,
@@ -1795,6 +1849,24 @@ export default function App() {
               }).catch(console.warn);
               showToast('Lecture scheduled into timetable.', 'success');
             }}
+            onUpdateTimetableSlot={(updatedSlot) => {
+              notifyUserChange();
+              const next = timetable.map(s => s.id === updatedSlot.id ? updatedSlot : s);
+              setTimetable(next);
+              try {
+                localStorage.setItem(STORAGE_KEY_TIMETABLE, JSON.stringify(next));
+              } catch (_) {}
+              dbService.saveEntireCampusState({
+                settings,
+                classes,
+                students,
+                teachers,
+                classrooms,
+                timetable: next,
+                sessions
+              }).catch(console.warn);
+              showToast(`Lecture "${updatedSlot.subject}" updated.`, 'success');
+            }}
             onDeleteTimetableSlot={(id) => {
               notifyUserChange();
               const next = timetable.filter(s => s.id !== id);
@@ -1836,7 +1908,8 @@ export default function App() {
             onDeclareHoliday={handleDeclareHoliday}
             onRemoveHoliday={handleRemoveHoliday}
           />
-        )}
+        </div>
+      )}
 
       </main>
 

@@ -38,7 +38,10 @@ import {
   parseDateKey,
   formatDateKey,
   isLegacyDummySession,
-  getHolidayForDate
+  getHolidayForDate,
+  getTodayDateStr,
+  isPastDate,
+  isFutureDate
 } from '../utils/dateUtils';
 import { getLecturesForDateAndUser } from '../utils/teacherFilter';
 
@@ -395,6 +398,14 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
               const cellHoliday = getHolidayForDate(cell.dateStr, holidays);
               const isSelected = selectedDate !== null && cell.dateStr === selectedDate;
               const isToday = cell.isToday;
+              const isPast = isPastDate(cell.dateStr);
+              const cellScheduledSlots = getLecturesForDateAndUser(
+                cell.dateStr,
+                currentUser,
+                timetable,
+                selectedClassFilter === 'all' ? undefined : selectedClassFilter
+              );
+              const hasScheduledOnCell = cellScheduledSlots.length > 0;
 
               // Color indicator based on attendance rate
               let badgeBg = 'bg-slate-100 text-slate-700 border border-slate-200/60';
@@ -593,7 +604,7 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
                 </button>
               )}
 
-              {/* Teacher Specific Action: Take Attendance (HOD cannot take attendance) */}
+              {/* Teacher Specific Action: Take Attendance */}
               {currentUser?.role === 'teacher' && (
                 hasScheduledLectureOnSelectedDate ? (
                   onNavigateToSession && (

@@ -79,6 +79,7 @@ interface HodControlCenterProps {
   onDeleteClass: (id: string) => void;
   timetable: TimetableSlot[];
   onAddTimetableSlot: (slot: TimetableSlot) => void;
+  onUpdateTimetableSlot?: (slot: TimetableSlot) => void;
   onDeleteTimetableSlot: (id: string) => void;
   students: Student[];
   onAddStudent: (student: Omit<Student, 'id'>, targetClassId: string) => void;
@@ -114,6 +115,7 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
   onDeleteClass,
   timetable,
   onAddTimetableSlot,
+  onUpdateTimetableSlot,
   onDeleteTimetableSlot,
   students,
   onAddStudent,
@@ -189,17 +191,23 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
 
   // Teacher Section State
   const [showAddTeacherModal, setShowAddTeacherModal] = useState(false);
+  const [editingTeacher, setEditingTeacher] = useState<Teacher | null>(null);
   const [newTeacherName, setNewTeacherName] = useState('');
   const [newTeacherCode, setNewTeacherCode] = useState(`TEACH${100 + teachers.length + 1}`);
   const [newTeacherPasscode, setNewTeacherPasscode] = useState('teach123');
   const [newTeacherEmail, setNewTeacherEmail] = useState('');
   const [newTeacherPhone, setNewTeacherPhone] = useState('+91');
+  const [newTeacherDepartment, setNewTeacherDepartment] = useState(settings.departmentName || 'Department of Electronics And Computer Engineering');
   const [newTeacherSubjects, setNewTeacherSubjects] = useState('');
+  const [showTeacherPasscodeInModal, setShowTeacherPasscodeInModal] = useState(false);
+  const [visiblePasscodes, setVisiblePasscodes] = useState<Record<string, boolean>>({});
+  const [facultySearchQuery, setFacultySearchQuery] = useState('');
   const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null);
 
   // Timetable Slot Form State
   const [selectedTimetableDay, setSelectedTimetableDay] = useState<'all' | DayOfWeek>('all');
   const [showAddSlotModal, setShowAddSlotModal] = useState(false);
+  const [editingSlot, setEditingSlot] = useState<TimetableSlot | null>(null);
   const [newSlotDay, setNewSlotDay] = useState<DayOfWeek>('Monday');
   const [newSlotStartTime, setNewSlotStartTime] = useState('08:00 AM');
   const [newSlotEndTime, setNewSlotEndTime] = useState('09:00 AM');
@@ -343,7 +351,59 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
     setTimeout(() => setSettingsSavedMsg(false), 3000);
   };
 
-  // Handle Save Teacher
+  // Open Add / Edit Teacher Modals
+  const handleOpenAddTeacher = () => {
+    setEditingTeacher(null);
+    setNewTeacherName('');
+    setNewTeacherCode(`TEACH${100 + teachers.length + 1}`);
+    setNewTeacherPasscode('teach123');
+    setNewTeacherEmail('');
+    setNewTeacherPhone('+91');
+    setNewTeacherDepartment(deptName || settings.departmentName || 'Department of Electronics And Computer Engineering');
+    setNewTeacherSubjects('');
+    setShowTeacherPasscodeInModal(false);
+    setShowAddTeacherModal(true);
+  };
+
+  const handleOpenEditTeacher = (t: Teacher) => {
+    setEditingTeacher(t);
+    setNewTeacherName(t.name);
+    setNewTeacherCode(t.uniqueCode);
+    setNewTeacherPasscode(t.passcode || 'teach123');
+    setNewTeacherEmail(t.email || '');
+    setNewTeacherPhone(t.phone || '+91');
+    setNewTeacherDepartment(t.department || deptName || settings.departmentName || 'Department of Electronics And Computer Engineering');
+    setNewTeacherSubjects(t.subjects ? t.subjects.join(', ') : '');
+    setShowTeacherPasscodeInModal(false);
+    setShowAddTeacherModal(true);
+  };
+
+  // Open Add / Edit Timetable Slot Modals
+  const handleOpenAddSlot = (defaultDay?: DayOfWeek) => {
+    setEditingSlot(null);
+    setNewSlotDay(defaultDay || (selectedTimetableDay === 'all' ? 'Monday' : selectedTimetableDay));
+    setNewSlotStartTime('08:00 AM');
+    setNewSlotEndTime('09:00 AM');
+    setNewSlotSubject('');
+    setNewSlotClassId(classes[0]?.id || '');
+    setNewSlotTeacherId(teachers[0]?.id || '');
+    setNewSlotRoomId(classrooms[0]?.id || '');
+    setShowAddSlotModal(true);
+  };
+
+  const handleOpenEditSlot = (slot: TimetableSlot) => {
+    setEditingSlot(slot);
+    setNewSlotDay(slot.dayOfWeek);
+    setNewSlotStartTime(slot.startTime);
+    setNewSlotEndTime(slot.endTime);
+    setNewSlotSubject(slot.subject);
+    setNewSlotClassId(slot.classId || classes[0]?.id || '');
+    setNewSlotTeacherId(slot.teacherId || teachers[0]?.id || '');
+    setNewSlotRoomId(slot.roomId || classrooms[0]?.id || '');
+    setShowAddSlotModal(true);
+  };
+
+  // Handle Save Teacher (Add / Edit)
   const handleSaveNewTeacher = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTeacherName.trim() || !newTeacherCode.trim()) return;
@@ -353,26 +413,44 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
       .map(s => s.trim())
       .filter(Boolean);
 
-    const teacherObj: Teacher = {
-      id: `teach-${Date.now()}`,
-      uniqueCode: newTeacherCode.trim().toUpperCase(),
-      passcode: newTeacherPasscode.trim() || 'teach123',
-      name: newTeacherName.trim(),
-      email: newTeacherEmail.trim() || `${newTeacherCode.toLowerCase()}@dypatil.edu`,
-      phone: newTeacherPhone.trim(),
-      department: deptName,
-      subjects: subjectsArr.length > 0 ? subjectsArr : ['General Engineering'],
-      assignedClasses: [classes[0]?.id || 'class-1']
-    };
+    if (editingTeacher) {
+      const updatedTeacher: Teacher = {
+        ...editingTeacher,
+        uniqueCode: newTeacherCode.trim().toUpperCase(),
+        passcode: newTeacherPasscode.trim() || 'teach123',
+        name: newTeacherName.trim(),
+        email: newTeacherEmail.trim() || `${newTeacherCode.toLowerCase()}@dypatil.edu`,
+        phone: newTeacherPhone.trim(),
+        department: newTeacherDepartment.trim() || deptName,
+        subjects: subjectsArr.length > 0 ? subjectsArr : editingTeacher.subjects
+      };
+      onUpdateTeacher(updatedTeacher);
+      setEditingTeacher(null);
+    } else {
+      const teacherObj: Teacher = {
+        id: `teach-${Date.now()}`,
+        uniqueCode: newTeacherCode.trim().toUpperCase(),
+        passcode: newTeacherPasscode.trim() || 'teach123',
+        name: newTeacherName.trim(),
+        email: newTeacherEmail.trim() || `${newTeacherCode.toLowerCase()}@dypatil.edu`,
+        phone: newTeacherPhone.trim(),
+        department: newTeacherDepartment.trim() || deptName,
+        subjects: subjectsArr.length > 0 ? subjectsArr : ['General Engineering'],
+        assignedClasses: [classes[0]?.id || 'class-1']
+      };
+      onAddTeacher(teacherObj);
+    }
 
-    onAddTeacher(teacherObj);
     setShowAddTeacherModal(false);
     setNewTeacherName('');
     setNewTeacherCode(`TEACH${100 + teachers.length + 2}`);
+    setNewTeacherPasscode('teach123');
+    setNewTeacherEmail('');
+    setNewTeacherPhone('+91');
     setNewTeacherSubjects('');
   };
 
-  // Handle Save Timetable Slot
+  // Handle Save Timetable Slot (Add / Edit)
   const handleSaveNewSlot = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSlotSubject.trim()) return;
@@ -381,22 +459,47 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
     const selectedTeacher = teachers.find(t => t.id === newSlotTeacherId);
     const selectedRoom = classrooms.find(r => r.id === newSlotRoomId);
 
-    const slot: TimetableSlot = {
-      id: `slot-${Date.now()}`,
-      dayOfWeek: newSlotDay,
-      startTime: newSlotStartTime,
-      endTime: newSlotEndTime,
-      timeSlotLabel: `${newSlotStartTime} - ${newSlotEndTime}`,
-      subject: newSlotSubject.trim(),
-      classId: newSlotClassId,
-      className: selectedClass?.name || 'Engineering Class',
-      teacherId: newSlotTeacherId,
-      teacherName: selectedTeacher?.name || 'Faculty Member',
-      roomId: newSlotRoomId,
-      roomName: selectedRoom?.name || 'Classroom'
-    };
+    if (editingSlot) {
+      const updatedSlot: TimetableSlot = {
+        ...editingSlot,
+        dayOfWeek: newSlotDay,
+        startTime: newSlotStartTime,
+        endTime: newSlotEndTime,
+        timeSlotLabel: `${newSlotStartTime} - ${newSlotEndTime}`,
+        subject: newSlotSubject.trim(),
+        classId: newSlotClassId,
+        className: selectedClass?.name || editingSlot.className,
+        teacherId: newSlotTeacherId,
+        teacherName: selectedTeacher?.name || editingSlot.teacherName,
+        roomId: newSlotRoomId,
+        roomName: selectedRoom?.name || editingSlot.roomName
+      };
 
-    onAddTimetableSlot(slot);
+      if (onUpdateTimetableSlot) {
+        onUpdateTimetableSlot(updatedSlot);
+      } else {
+        onAddTimetableSlot(updatedSlot);
+      }
+      setEditingSlot(null);
+    } else {
+      const slot: TimetableSlot = {
+        id: `slot-${Date.now()}`,
+        dayOfWeek: newSlotDay,
+        startTime: newSlotStartTime,
+        endTime: newSlotEndTime,
+        timeSlotLabel: `${newSlotStartTime} - ${newSlotEndTime}`,
+        subject: newSlotSubject.trim(),
+        classId: newSlotClassId,
+        className: selectedClass?.name || 'Engineering Class',
+        teacherId: newSlotTeacherId,
+        teacherName: selectedTeacher?.name || 'Faculty Member',
+        roomId: newSlotRoomId,
+        roomName: selectedRoom?.name || 'Classroom'
+      };
+
+      onAddTimetableSlot(slot);
+    }
+
     setShowAddSlotModal(false);
     setNewSlotSubject('');
   };
@@ -1155,21 +1258,31 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
                             key={slot.id}
                             className="bg-slate-50/70 hover:bg-white rounded-2xl border border-slate-200 hover:border-sky-300 p-4 shadow-2xs hover:shadow-xs transition-all duration-200 flex flex-col justify-between gap-3 group"
                           >
-                            {/* Top row: Time & Delete */}
+                            {/* Top row: Time & Edit/Delete actions */}
                             <div className="flex items-center justify-between gap-2">
                               <span className="inline-flex items-center gap-1.5 text-xs font-mono font-bold text-sky-800 bg-sky-100/90 px-2.5 py-1 rounded-lg border border-sky-200">
                                 <Clock className="w-3.5 h-3.5 text-sky-600" />
                                 <span>{slot.timeSlotLabel}</span>
                               </span>
 
-                              <button
-                                type="button"
-                                onClick={() => onDeleteTimetableSlot(slot.id)}
-                                className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer opacity-75 group-hover:opacity-100"
-                                title="Remove lecture slot"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEditSlot(slot)}
+                                  className="text-slate-400 hover:text-sky-600 p-1.5 rounded-lg hover:bg-sky-50 transition-colors cursor-pointer"
+                                  title="Edit lecture details, time & assigned faculty"
+                                >
+                                  <Edit3 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => onDeleteTimetableSlot(slot.id)}
+                                  className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer opacity-75 group-hover:opacity-100"
+                                  title="Remove lecture slot"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
                             </div>
 
                             {/* Middle row: Subject Title & Class */}
@@ -1215,92 +1328,196 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
                 <div>
                   <h2 className="text-base sm:text-lg font-black text-slate-900">Faculty Roster & Login Credentials</h2>
                   <p className="text-xs text-slate-500">
-                    HOD assigns unique codes and subjects to teachers for authorized login
+                    HOD has full access to edit faculty details, assigned subjects, and login credentials (unique code & password)
                   </p>
                 </div>
               </div>
 
               <button
                 type="button"
-                onClick={() => setShowAddTeacherModal(true)}
-                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all shadow-sm cursor-pointer active:scale-95"
+                onClick={handleOpenAddTeacher}
+                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all shadow-sm cursor-pointer active:scale-95 shrink-0"
               >
                 <Plus className="w-4 h-4" />
                 <span>Add New Faculty</span>
               </button>
             </div>
 
+            {/* Faculty Search Bar */}
+            <div className="flex items-center gap-2 bg-white px-3.5 py-2.5 rounded-2xl border border-slate-200/90 shadow-2xs">
+              <Search className="w-4 h-4 text-slate-400 shrink-0" />
+              <input
+                type="text"
+                value={facultySearchQuery}
+                onChange={(e) => setFacultySearchQuery(e.target.value)}
+                placeholder="Search faculty by name, login code, email, or subject..."
+                className="w-full bg-transparent text-xs font-semibold text-slate-900 focus:outline-hidden"
+              />
+              {facultySearchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setFacultySearchQuery('')}
+                  className="text-slate-400 hover:text-slate-600 p-1 rounded-md text-xs cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
             {/* Teachers Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {teachers.map(teacher => (
-                <div 
-                  key={teacher.id}
-                  className="bg-white rounded-3xl border border-slate-200 p-4 sm:p-5 shadow-xs space-y-3.5"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center text-sm border border-emerald-200">
-                        {teacher.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
-                      </div>
-                      <div>
-                        <h3 className="text-sm font-bold text-slate-900">{teacher.name}</h3>
-                        <p className="text-xs text-slate-500">{teacher.email}</p>
-                      </div>
-                    </div>
-
-                    {teachers.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => onDeleteTeacher(teacher.id)}
-                        className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"
-                        title="Remove teacher"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Unique Login Credentials Badge */}
-                  <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <p className="text-[10px] uppercase font-bold text-slate-500">Unique Login Code & Passcode</p>
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono font-extrabold text-sm text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-lg border border-emerald-300">
-                          {teacher.uniqueCode}
-                        </span>
-                        <span className="text-xs font-mono text-slate-500">
-                          Pass: <strong className="text-slate-800">{teacher.passcode}</strong>
-                        </span>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => copyToClipboard(teacher.uniqueCode, teacher.id)}
-                      className="p-2 rounded-xl bg-white border border-slate-200 text-slate-600 hover:text-emerald-700 hover:bg-emerald-50 transition-all cursor-pointer shadow-2xs"
-                      title="Copy teacher code"
+              {teachers
+                .filter(t => {
+                  if (!facultySearchQuery.trim()) return true;
+                  const q = facultySearchQuery.toLowerCase();
+                  return (
+                    t.name.toLowerCase().includes(q) ||
+                    t.uniqueCode.toLowerCase().includes(q) ||
+                    (t.email && t.email.toLowerCase().includes(q)) ||
+                    (t.subjects && t.subjects.some(s => s.toLowerCase().includes(q)))
+                  );
+                })
+                .map(teacher => {
+                  const isPassVisible = !!visiblePasscodes[teacher.id];
+                  return (
+                    <div 
+                      key={teacher.id}
+                      className="bg-white rounded-3xl border border-slate-200 p-4 sm:p-5 shadow-xs space-y-3.5 hover:border-emerald-300 transition-all"
                     >
-                      {copiedCodeId === teacher.id ? (
-                        <Check className="w-4 h-4 text-emerald-600" />
-                      ) : (
-                        <Copy className="w-4 h-4" />
-                      )}
-                    </button>
-                  </div>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center text-sm border border-emerald-200 shrink-0">
+                            {teacher.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                          </div>
+                          <div>
+                            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                              <span>{teacher.name}</span>
+                              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200">
+                                {teacher.uniqueCode}
+                              </span>
+                            </h3>
+                            <p className="text-xs text-slate-500">{teacher.email || `${teacher.uniqueCode.toLowerCase()}@dypatil.edu`}</p>
+                            {teacher.phone && (
+                              <p className="text-[11px] text-slate-400 font-mono">{teacher.phone}</p>
+                            )}
+                          </div>
+                        </div>
 
-                  {/* Respective Subjects */}
-                  <div className="space-y-1">
-                    <p className="text-[11px] font-bold text-slate-600">Assigned Subjects:</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {teacher.subjects.map((sub, idx) => (
-                        <span key={idx} className="px-2.5 py-0.5 rounded-lg bg-sky-50 text-sky-800 text-[11px] font-medium border border-sky-200">
-                          {sub}
-                        </span>
-                      ))}
+                        {/* Top Card Actions: Edit & Delete */}
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditTeacher(teacher)}
+                            className="p-1.5 rounded-lg bg-slate-50 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 border border-slate-200 transition-colors cursor-pointer"
+                            title="Edit faculty overall details & login credentials"
+                          >
+                            <Edit3 className="w-4 h-4" />
+                          </button>
+                          {teachers.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => onDeleteTeacher(teacher.id)}
+                              className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"
+                              title="Remove teacher"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Unique Login Credentials Badge with Password Toggle */}
+                      <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1.5">
+                            <Lock className="w-3 h-3 text-slate-400" />
+                            <span>Faculty Login Credentials</span>
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditTeacher(teacher)}
+                            className="text-[10.5px] font-bold text-emerald-700 hover:text-emerald-800 hover:underline cursor-pointer flex items-center gap-1"
+                          >
+                            <Edit3 className="w-3 h-3" />
+                            <span>Edit Credentials</span>
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                          {/* Login Code */}
+                          <div className="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-xl border border-slate-200">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10.5px] text-slate-500 font-medium">Code:</span>
+                              <span className="font-mono font-black text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 text-xs">
+                                {teacher.uniqueCode}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => copyToClipboard(teacher.uniqueCode, `code-${teacher.id}`)}
+                              className="p-1 rounded text-slate-400 hover:text-emerald-700 transition-colors cursor-pointer"
+                              title="Copy login code"
+                            >
+                              {copiedCodeId === `code-${teacher.id}` ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-600" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          </div>
+
+                          {/* Passcode with Show/Hide toggle */}
+                          <div className="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-xl border border-slate-200">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="text-[10.5px] text-slate-500 font-medium">Pass:</span>
+                              <span className="font-mono font-bold text-slate-800 text-xs truncate">
+                                {isPassVisible ? teacher.passcode : '••••••••'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-0.5">
+                              <button
+                                type="button"
+                                onClick={() => setVisiblePasscodes(prev => ({ ...prev, [teacher.id]: !prev[teacher.id] }))}
+                                className="p-1 rounded text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
+                                title={isPassVisible ? 'Hide password' : 'Show password'}
+                              >
+                                {isPassVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => copyToClipboard(teacher.passcode, `pass-${teacher.id}`)}
+                                className="p-1 rounded text-slate-400 hover:text-emerald-700 transition-colors cursor-pointer"
+                                title="Copy password"
+                              >
+                                {copiedCodeId === `pass-${teacher.id}` ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                ) : (
+                                  <Copy className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Respective Subjects */}
+                      <div className="space-y-1">
+                        <p className="text-[11px] font-bold text-slate-600">Assigned Subjects:</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {teacher.subjects && teacher.subjects.length > 0 ? (
+                            teacher.subjects.map((sub, idx) => (
+                              <span key={idx} className="px-2.5 py-0.5 rounded-lg bg-sky-50 text-sky-800 text-[11px] font-medium border border-sky-200">
+                                {sub}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-[11px] text-slate-400 italic">No specific subjects assigned</span>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
-              ))}
+                  );
+                })}
             </div>
           </div>
         )}
@@ -1992,81 +2209,179 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
         </div>
       )}
 
-      {/* MODAL: ADD TEACHER */}
+      {/* MODAL: ADD / EDIT TEACHER & LOGIN CREDENTIALS */}
       {showAddTeacherModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
-          <div className="bg-white rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl border border-slate-200 space-y-4 animate-scaleUp">
+          <div className="bg-white rounded-3xl p-6 sm:p-7 max-w-lg w-full shadow-2xl border border-slate-200 space-y-4 animate-scaleUp max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h3 className="text-base font-extrabold text-slate-900">Add New Faculty</h3>
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                  <Users className="w-4.5 h-4.5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    {editingTeacher ? 'Edit Faculty & Login Credentials' : 'Add New Faculty Member'}
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    {editingTeacher ? `Modifying profile & credentials for ${editingTeacher.name}` : 'Create a new faculty account with unique credentials'}
+                  </p>
+                </div>
+              </div>
               <button
                 type="button"
-                onClick={() => setShowAddTeacherModal(false)}
+                onClick={() => {
+                  setShowAddTeacherModal(false);
+                  setEditingTeacher(null);
+                }}
                 className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveNewTeacher} className="space-y-3.5">
+            <form onSubmit={handleSaveNewTeacher} className="space-y-4">
               <div className="space-y-1">
-                <label className="block text-xs font-bold text-slate-700">Faculty Name *</label>
+                <label className="block text-xs font-bold text-slate-700">Faculty Full Name *</label>
                 <input
                   type="text"
                   value={newTeacherName}
                   onChange={(e) => setNewTeacherName(e.target.value)}
-                  placeholder="Prof. Name"
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900"
+                  placeholder="e.g. Prof. Ramesh Deshmukh"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/30"
                   required
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              {/* Unique Login Credentials Box */}
+              <div className="p-3.5 bg-emerald-50/60 rounded-2xl border border-emerald-200/90 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-emerald-900 flex items-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>Faculty Login Access</span>
+                  </span>
+                  <span className="text-[10px] text-emerald-700 font-medium">Immediate activation on save</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="block text-xs font-bold text-slate-700">Login Code *</label>
+                    <input
+                      type="text"
+                      value={newTeacherCode}
+                      onChange={(e) => setNewTeacherCode(e.target.value.toUpperCase())}
+                      placeholder="e.g. TEACH101"
+                      className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-black text-emerald-900 uppercase focus:outline-hidden focus:ring-2 focus:ring-emerald-500/30"
+                      required
+                    />
+                    <p className="text-[10px] text-slate-500">Used as login username</p>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-xs font-bold text-slate-700">Login Passcode / Password *</label>
+                    <div className="relative flex items-center">
+                      <input
+                        type={showTeacherPasscodeInModal ? 'text' : 'password'}
+                        value={newTeacherPasscode}
+                        onChange={(e) => setNewTeacherPasscode(e.target.value)}
+                        placeholder="e.g. teach123"
+                        className="w-full bg-white border border-slate-300 rounded-xl pl-3 pr-9 py-2 text-xs font-mono font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/30"
+                        required
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowTeacherPasscodeInModal(!showTeacherPasscodeInModal)}
+                        className="absolute right-2.5 text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+                        title={showTeacherPasscodeInModal ? 'Hide passcode' : 'Show passcode'}
+                      >
+                        {showTeacherPasscodeInModal ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-slate-500">Teacher's login password</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="block text-xs font-bold text-slate-700">Unique Code *</label>
+                  <label className="block text-xs font-bold text-slate-700">Email Address</label>
                   <input
-                    type="text"
-                    value={newTeacherCode}
-                    onChange={(e) => setNewTeacherCode(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-emerald-800 uppercase"
-                    required
+                    type="email"
+                    value={newTeacherEmail}
+                    onChange={(e) => setNewTeacherEmail(e.target.value)}
+                    placeholder="teacher@dypatil.edu"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/30"
                   />
                 </div>
+
                 <div className="space-y-1">
-                  <label className="block text-xs font-bold text-slate-700">Passcode *</label>
+                  <label className="block text-xs font-bold text-slate-700">Phone (WhatsApp)</label>
                   <input
-                    type="text"
-                    value={newTeacherPasscode}
-                    onChange={(e) => setNewTeacherPasscode(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-900"
-                    required
+                    type="tel"
+                    value={newTeacherPhone}
+                    onChange={(e) => setNewTeacherPhone(e.target.value)}
+                    placeholder="+91..."
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/30"
                   />
                 </div>
               </div>
 
               <div className="space-y-1">
+                <label className="block text-xs font-bold text-slate-700">Assigned Department</label>
+                <input
+                  type="text"
+                  value={newTeacherDepartment}
+                  onChange={(e) => setNewTeacherDepartment(e.target.value)}
+                  placeholder="Department of Electronics And Computer Engineering"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/30"
+                />
+              </div>
+
+              <div className="space-y-1.5">
                 <label className="block text-xs font-bold text-slate-700">Assigned Subjects (comma-separated)</label>
                 <input
                   type="text"
                   value={newTeacherSubjects}
                   onChange={(e) => setNewTeacherSubjects(e.target.value)}
-                  placeholder="e.g. AI, Cloud Computing"
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900"
+                  placeholder="e.g. AI, Cyber Security, Cloud Computing, DSP"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/30"
                 />
+                {/* Suggested quick subject pills */}
+                <div className="flex flex-wrap gap-1 pt-1">
+                  {['AI & Machine Learning', 'Cyber Security', 'Cloud Computing', 'Data Structures', 'Embedded Systems', 'IoT'].map(sub => (
+                    <button
+                      key={sub}
+                      type="button"
+                      onClick={() => {
+                        const current = newTeacherSubjects.split(',').map(s => s.trim()).filter(Boolean);
+                        if (!current.includes(sub)) {
+                          setNewTeacherSubjects([...current, sub].join(', '));
+                        }
+                      }}
+                      className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 cursor-pointer"
+                    >
+                      + {sub}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              <div className="flex items-center justify-end gap-2.5 pt-3">
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setShowAddTeacherModal(false)}
+                  onClick={() => {
+                    setShowAddTeacherModal(false);
+                    setEditingTeacher(null);
+                  }}
                   className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md cursor-pointer"
+                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md cursor-pointer flex items-center gap-1.5"
                 >
-                  Create Faculty
+                  <Save className="w-3.5 h-3.5" />
+                  <span>{editingTeacher ? 'Save Faculty Changes' : 'Create Faculty Account'}</span>
                 </button>
               </div>
             </form>
@@ -2074,15 +2389,30 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
         </div>
       )}
 
-      {/* MODAL: ADD TIMETABLE SLOT */}
+      {/* MODAL: ADD / EDIT TIMETABLE SLOT */}
       {showAddSlotModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
-          <div className="bg-white rounded-3xl p-6 sm:p-7 max-w-lg w-full shadow-2xl border border-slate-200 space-y-4 animate-scaleUp">
+          <div className="bg-white rounded-3xl p-6 sm:p-7 max-w-lg w-full shadow-2xl border border-slate-200 space-y-4 animate-scaleUp max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h3 className="text-base font-extrabold text-slate-900">Schedule Lecture Hour</h3>
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center">
+                  <Clock className="w-4.5 h-4.5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    {editingSlot ? 'Edit Timetable Lecture' : 'Schedule Lecture Hour'}
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    {editingSlot ? `Editing ${editingSlot.subject} (${editingSlot.timeSlotLabel})` : 'Allocate subject, faculty, class, and room for a time slot'}
+                  </p>
+                </div>
+              </div>
               <button
                 type="button"
-                onClick={() => setShowAddSlotModal(false)}
+                onClick={() => {
+                  setShowAddSlotModal(false);
+                  setEditingSlot(null);
+                }}
                 className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
               >
                 <X className="w-5 h-5" />
@@ -2092,11 +2422,11 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
             <form onSubmit={handleSaveNewSlot} className="space-y-3.5">
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="block text-xs font-bold text-slate-700">Day of Week</label>
+                  <label className="block text-xs font-bold text-slate-700">Day of Week *</label>
                   <select
                     value={newSlotDay}
                     onChange={(e) => setNewSlotDay(e.target.value as DayOfWeek)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-sky-500/30"
                   >
                     {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map(d => (
                       <option key={d} value={d}>{d}</option>
@@ -2110,42 +2440,74 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
                     value={newSlotSubject}
                     onChange={(e) => setNewSlotSubject(e.target.value)}
                     placeholder="e.g. Cyber Security"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-sky-500/30"
                     required
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="block text-xs font-bold text-slate-700">Start Time</label>
-                  <input
-                    type="text"
-                    value={newSlotStartTime}
-                    onChange={(e) => setNewSlotStartTime(e.target.value)}
-                    placeholder="08:00 AM"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-900"
-                  />
+              {/* Start Time & End Time */}
+              <div className="space-y-1.5">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="block text-xs font-bold text-slate-700">Start Time</label>
+                    <input
+                      type="text"
+                      value={newSlotStartTime}
+                      onChange={(e) => setNewSlotStartTime(e.target.value)}
+                      placeholder="08:00 AM"
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-sky-500/30"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-xs font-bold text-slate-700">End Time</label>
+                    <input
+                      type="text"
+                      value={newSlotEndTime}
+                      onChange={(e) => setNewSlotEndTime(e.target.value)}
+                      placeholder="09:00 AM"
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-sky-500/30"
+                    />
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <label className="block text-xs font-bold text-slate-700">End Time</label>
-                  <input
-                    type="text"
-                    value={newSlotEndTime}
-                    onChange={(e) => setNewSlotEndTime(e.target.value)}
-                    placeholder="09:00 AM"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-900"
-                  />
+
+                {/* Quick time slot presets */}
+                <div className="flex flex-wrap gap-1 pt-1">
+                  {[
+                    ['08:00 AM', '09:00 AM'],
+                    ['09:00 AM', '10:00 AM'],
+                    ['10:15 AM', '11:15 AM'],
+                    ['11:15 AM', '12:15 PM'],
+                    ['01:00 PM', '02:00 PM'],
+                    ['02:00 PM', '03:00 PM'],
+                    ['03:00 PM', '04:00 PM']
+                  ].map(([st, et]) => (
+                    <button
+                      key={`${st}-${et}`}
+                      type="button"
+                      onClick={() => {
+                        setNewSlotStartTime(st);
+                        setNewSlotEndTime(et);
+                      }}
+                      className={`text-[10px] font-mono px-2 py-0.5 rounded-md border cursor-pointer ${
+                        newSlotStartTime === st && newSlotEndTime === et
+                          ? 'bg-sky-600 text-white border-sky-600 font-bold'
+                          : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+                      }`}
+                    >
+                      {st.slice(0, 5)} - {et.slice(0, 5)}
+                    </button>
+                  ))}
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="space-y-1">
-                  <label className="block text-xs font-bold text-slate-700">Class</label>
+                  <label className="block text-xs font-bold text-slate-700">Class / Division</label>
                   <select
                     value={newSlotClassId}
                     onChange={(e) => setNewSlotClassId(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-sky-500/30"
                   >
                     {classes.map(c => (
                       <option key={c.id} value={c.id}>{c.name}</option>
@@ -2153,44 +2515,48 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
                   </select>
                 </div>
                 <div className="space-y-1">
-                  <label className="block text-xs font-bold text-slate-700">Faculty</label>
+                  <label className="block text-xs font-bold text-slate-700">Assigned Faculty</label>
                   <select
                     value={newSlotTeacherId}
                     onChange={(e) => setNewSlotTeacherId(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-sky-500/30"
                   >
                     {teachers.map(t => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
+                      <option key={t.id} value={t.id}>{t.name} ({t.uniqueCode})</option>
                     ))}
                   </select>
                 </div>
                 <div className="space-y-1">
-                  <label className="block text-xs font-bold text-slate-700">Classroom</label>
+                  <label className="block text-xs font-bold text-slate-700">Classroom / Lab</label>
                   <select
                     value={newSlotRoomId}
                     onChange={(e) => setNewSlotRoomId(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-sky-500/30"
                   >
                     {classrooms.map(r => (
-                      <option key={r.id} value={r.id}>{r.name}</option>
+                      <option key={r.id} value={r.id}>{r.name} ({r.building})</option>
                     ))}
                   </select>
                 </div>
               </div>
 
-              <div className="flex items-center justify-end gap-2.5 pt-3">
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setShowAddSlotModal(false)}
+                  onClick={() => {
+                    setShowAddSlotModal(false);
+                    setEditingSlot(null);
+                  }}
                   className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold shadow-md cursor-pointer"
+                  className="px-5 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold shadow-md cursor-pointer flex items-center gap-1.5"
                 >
-                  Schedule Lecture
+                  <Save className="w-3.5 h-3.5" />
+                  <span>{editingSlot ? 'Save Timetable Changes' : 'Schedule Lecture'}</span>
                 </button>
               </div>
             </form>
