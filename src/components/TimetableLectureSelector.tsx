@@ -506,6 +506,30 @@ export const TimetableLectureSelector: React.FC<TimetableLectureSelectorProps> =
                     className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-sky-500/30"
                     required
                   />
+                  {/* Selected Faculty's Respected Subjects */}
+                  {(() => {
+                    const selTeacher = teachers.find(t => t.id === slotTeacherId);
+                    if (!selTeacher || !selTeacher.subjects || selTeacher.subjects.length === 0) return null;
+                    return (
+                      <div className="flex flex-wrap items-center gap-1 pt-1">
+                        <span className="text-[10px] text-slate-500 font-medium">Faculty Subjects:</span>
+                        {selTeacher.subjects.map((sub, i) => (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => setSlotSubject(sub)}
+                            className={`text-[10px] px-2 py-0.5 rounded-md font-semibold border cursor-pointer transition-all ${
+                              slotSubject.toLowerCase() === sub.toLowerCase()
+                                ? 'bg-sky-600 text-white border-sky-600'
+                                : 'bg-white hover:bg-sky-50 text-slate-700 border-slate-200'
+                            }`}
+                          >
+                            {sub}
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -581,7 +605,14 @@ export const TimetableLectureSelector: React.FC<TimetableLectureSelectorProps> =
                   <label className="block text-xs font-bold text-slate-700">Assigned Faculty</label>
                   <select
                     value={slotTeacherId}
-                    onChange={(e) => setSlotTeacherId(e.target.value)}
+                    onChange={(e) => {
+                      const tId = e.target.value;
+                      setSlotTeacherId(tId);
+                      const tObj = teachers.find(t => t.id === tId);
+                      if (tObj && tObj.subjects && tObj.subjects.length > 0 && !slotSubject) {
+                        setSlotSubject(tObj.subjects[0]);
+                      }
+                    }}
                     className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-sky-500/30"
                   >
                     {teachers.map(t => (

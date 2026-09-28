@@ -91,6 +91,15 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
     setParentPhone(student.parentPhone || '');
     setEmail(student.email || '');
     setIsAdding(false);
+
+    // Scroll smoothly to exact place of this student
+    setTimeout(() => {
+      const el = document.getElementById(`student-edit-desktop-${student.id}`) || 
+                 document.getElementById(`student-edit-mobile-${student.id}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }, 50);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -149,6 +158,149 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
     }
     setShowDeleteAllModal(false);
   };
+
+  const renderInlineStudentEditor = (student: Student, isMobile: boolean) => (
+    <div 
+      id={isMobile ? `student-edit-mobile-${student.id}` : `student-edit-desktop-${student.id}`}
+      className="bg-white p-4 sm:p-5 rounded-2xl border-2 border-emerald-500 shadow-xl ring-4 ring-emerald-500/15 space-y-4 animate-fadeIn my-1"
+    >
+      <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-xs shrink-0">
+            <GraduationCap className="w-4.5 h-4.5" />
+          </div>
+          <div>
+            <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
+              <span>Edit Student Profile</span>
+              <span className="font-mono text-xs px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200">
+                #{student.rollNo}
+              </span>
+            </h3>
+            <p className="text-[11px] text-slate-500 font-medium">
+              Editing right here at #{student.rollNo} {student.name} — no scrolling needed
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={resetForm}
+          className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
+          title="Cancel editing"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="space-y-1">
+            <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+              Roll Number *
+            </label>
+            <input
+              type="text"
+              value={rollNo}
+              onChange={(e) => setRollNo(e.target.value)}
+              placeholder="e.g. 01"
+              className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+              required
+            />
+          </div>
+
+          <div className="space-y-1 sm:col-span-1 lg:col-span-2">
+            <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+              Full Student Name *
+            </label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Aarav Sharma"
+              className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+              required
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+              Gender
+            </label>
+            <div className="flex items-center gap-2 pt-1">
+              {(['M', 'F', 'Other'] as const).map(g => (
+                <label key={g} className="flex items-center gap-1.5 text-xs font-medium text-slate-700 cursor-pointer">
+                  <input
+                    type="radio"
+                    name={`gender-${student.id}`}
+                    value={g}
+                    checked={gender === g}
+                    onChange={() => setGender(g)}
+                    className="text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span>{g === 'M' ? 'Male' : g === 'F' ? 'Female' : 'Other'}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+              Parent / Guardian Name
+            </label>
+            <input
+              type="text"
+              value={parentName}
+              onChange={(e) => setParentName(e.target.value)}
+              placeholder="e.g. Ramesh Sharma"
+              className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+              Parent WhatsApp Contact
+            </label>
+            <input
+              type="tel"
+              value={parentPhone}
+              onChange={(e) => setParentPhone(e.target.value)}
+              placeholder="+919876543210"
+              className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+
+          <div className="space-y-1 sm:col-span-2 lg:col-span-3">
+            <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+              Student Email
+            </label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="student@dypatil.edu"
+              className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+          <button
+            type="button"
+            onClick={resetForm}
+            className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-md cursor-pointer"
+          >
+            <Check className="w-3.5 h-3.5" />
+            <span>Save Changes</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  );
 
   return (
     <div className="space-y-6">
@@ -209,13 +361,13 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
         </div>
       </div>
 
-      {/* Add / Edit Form Card */}
-      {(isAdding || editingStudentId) && (
-        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-300 shadow-sm transition-all animate-fadeIn">
+      {/* Enroll New Student Form Card (Only shown when 'Add Student' is clicked from top header) */}
+      {isAdding && (
+        <div id="enroll-new-student-card" className="bg-white p-4 sm:p-5 rounded-2xl border-2 border-slate-900/20 shadow-md transition-all animate-fadeIn">
           <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-100">
             <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-              <GraduationCap className="w-4 h-4 text-amber-500" />
-              <span>{editingStudentId ? 'Edit Student Profile' : 'Enroll New Student'}</span>
+              <UserPlus className="w-4 h-4 text-emerald-600" />
+              <span>Enroll New Student</span>
             </h2>
             <button
               type="button"
@@ -331,7 +483,7 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
                 className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
               >
                 <Check className="w-3.5 h-3.5" />
-                <span>{editingStudentId ? 'Save Changes' : 'Enroll Student'}</span>
+                <span>Enroll Student</span>
               </button>
             </div>
           </form>
@@ -371,52 +523,61 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
               No students found. Use "Add Student" or "Scan Excel / PDF" to enroll students.
             </div>
           ) : (
-            filteredStudents.map(student => (
-              <div key={student.id} className="p-3.5 space-y-2 hover:bg-slate-50/50 transition-colors">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono font-bold text-xs px-2 py-0.5 rounded-md bg-slate-100 text-slate-800">
-                      #{student.rollNo}
-                    </span>
-                    <span className="font-bold text-xs text-slate-900">{student.name}</span>
-                    <span className="text-[10px] text-slate-500 font-medium">({student.gender})</span>
+            filteredStudents.map(student => {
+              if (editingStudentId === student.id) {
+                return (
+                  <div key={student.id} className="p-2 sm:p-3">
+                    {renderInlineStudentEditor(student, true)}
+                  </div>
+                );
+              }
+              return (
+                <div key={student.id} id={`student-card-mobile-${student.id}`} className="p-3.5 space-y-2 hover:bg-slate-50/50 transition-colors">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-bold text-xs px-2 py-0.5 rounded-md bg-slate-100 text-slate-800">
+                        #{student.rollNo}
+                      </span>
+                      <span className="font-bold text-xs text-slate-900">{student.name}</span>
+                      <span className="text-[10px] text-slate-500 font-medium">({student.gender})</span>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => handleStartEdit(student)}
+                        className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                        title="Edit student"
+                      >
+                        <Edit className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setStudentToDelete(student)}
+                        className="p-1.5 text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                        title="Delete student"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => handleStartEdit(student)}
-                      className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-                      title="Edit student"
-                    >
-                      <Edit className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setStudentToDelete(student)}
-                      className="p-1.5 text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                      title="Delete student"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                  <div className="flex items-center justify-between text-xs text-slate-500 pt-1 border-t border-slate-100 gap-2 flex-wrap">
+                    <span className="truncate">
+                      Parent: {student.parentName || '—'}
+                    </span>
+                    {student.parentPhone ? (
+                      <span className="inline-flex items-center gap-1 text-emerald-800 font-semibold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 text-[11px] shrink-0">
+                        <Phone className="w-3 h-3 text-[#25D366]" />
+                        {student.parentPhone}
+                      </span>
+                    ) : (
+                      <span className="text-[11px] text-slate-400">No phone</span>
+                    )}
                   </div>
                 </div>
-
-                <div className="flex items-center justify-between text-xs text-slate-500 pt-1 border-t border-slate-100 gap-2 flex-wrap">
-                  <span className="truncate">
-                    Parent: {student.parentName || '—'}
-                  </span>
-                  {student.parentPhone ? (
-                    <span className="inline-flex items-center gap-1 text-emerald-800 font-semibold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 text-[11px] shrink-0">
-                      <Phone className="w-3 h-3 text-[#25D366]" />
-                      {student.parentPhone}
-                    </span>
-                  ) : (
-                    <span className="text-[11px] text-slate-400">No phone</span>
-                  )}
-                </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
 
@@ -441,51 +602,62 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
                   </td>
                 </tr>
               ) : (
-                filteredStudents.map(student => (
-                  <tr key={student.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="py-3.5 px-4 font-mono font-bold text-slate-800">#{student.rollNo}</td>
-                    <td className="py-3.5 px-4">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-7 h-7 rounded-xl bg-slate-800 text-white font-bold text-xs flex items-center justify-center">
-                          {student.name.slice(0, 1)}
+                filteredStudents.map(student => {
+                  if (editingStudentId === student.id) {
+                    return (
+                      <tr key={student.id} id={`student-edit-desktop-${student.id}`} className="bg-emerald-50/20">
+                        <td colSpan={6} className="p-3 sm:p-4">
+                          {renderInlineStudentEditor(student, false)}
+                        </td>
+                      </tr>
+                    );
+                  }
+                  return (
+                    <tr key={student.id} id={`student-row-desktop-${student.id}`} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="py-3.5 px-4 font-mono font-bold text-slate-800">#{student.rollNo}</td>
+                      <td className="py-3.5 px-4">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-7 h-7 rounded-xl bg-slate-800 text-white font-bold text-xs flex items-center justify-center">
+                            {student.name.slice(0, 1)}
+                          </div>
+                          <span className="font-bold text-slate-900">{student.name}</span>
                         </div>
-                        <span className="font-bold text-slate-900">{student.name}</span>
-                      </div>
-                    </td>
-                    <td className="py-3.5 px-4 text-slate-600 font-medium">{student.gender}</td>
-                    <td className="py-3.5 px-4 text-slate-700 font-medium">{student.parentName || '—'}</td>
-                    <td className="py-3.5 px-4 font-mono text-slate-700">
-                      {student.parentPhone ? (
-                        <span className="inline-flex items-center gap-1.5 text-emerald-800 font-semibold bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">
-                          <Phone className="w-3 h-3 text-[#25D366]" />
-                          {student.parentPhone}
-                        </span>
-                      ) : (
-                        '—'
-                      )}
-                    </td>
-                    <td className="py-3.5 px-4 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => handleStartEdit(student)}
-                          className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
-                          title="Edit student"
-                        >
-                          <Edit className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setStudentToDelete(student)}
-                          className="p-2 text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
-                          title="Delete student"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                      </td>
+                      <td className="py-3.5 px-4 text-slate-600 font-medium">{student.gender}</td>
+                      <td className="py-3.5 px-4 text-slate-700 font-medium">{student.parentName || '—'}</td>
+                      <td className="py-3.5 px-4 font-mono text-slate-700">
+                        {student.parentPhone ? (
+                          <span className="inline-flex items-center gap-1.5 text-emerald-800 font-semibold bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">
+                            <Phone className="w-3 h-3 text-[#25D366]" />
+                            {student.parentPhone}
+                          </span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td className="py-3.5 px-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleStartEdit(student)}
+                            className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                            title="Edit student"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setStudentToDelete(student)}
+                            className="p-2 text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
+                            title="Delete student"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

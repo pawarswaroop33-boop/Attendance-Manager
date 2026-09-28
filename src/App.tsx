@@ -669,6 +669,34 @@ export default function App() {
       (activeLectureSlotId ? s.lectureSlotId === activeLectureSlotId : (currentUser?.role === 'teacher' ? isSessionBelongsToTeacher(s, currentUser, timetable) : true))
     );
 
+    // Resolve active slot
+    const slot = activeSlot || (activeLectureSlotId ? timetable.find(s => s.id === activeLectureSlotId) : undefined);
+
+    // Find assigned teacher
+    const matchedTeacher = teachers.find(t => 
+      (slot?.teacherId && t.id === slot.teacherId) ||
+      (currentUser?.id && t.id === currentUser.id) ||
+      (slot?.teacherName && t.name.toLowerCase() === slot.teacherName.toLowerCase()) ||
+      (currentUser?.name && t.name.toLowerCase() === currentUser.name.toLowerCase())
+    );
+
+    // Dynamic effective subject: slot subject -> teacher's respected subjects -> session subject -> classGroup subject
+    const effectiveSubject = slot?.subject ||
+      (matchedTeacher && matchedTeacher.subjects && matchedTeacher.subjects.length > 0 ? matchedTeacher.subjects[0] : undefined) ||
+      (currentUser?.role === 'teacher' && currentUser.assignedSubjects?.[0] ? currentUser.assignedSubjects[0] : undefined) ||
+      existing?.subject ||
+      currentClass.subject ||
+      'Applied AI';
+
+    const effectiveTimeSlot = slot?.timeSlotLabel || existing?.timeSlot || '08:00 AM - 09:00 AM';
+    const effectiveSessionName = `${effectiveTimeSlot} - ${effectiveSubject}`;
+    const effectiveTeacherName = currentUser?.role === 'teacher' 
+      ? currentUser.name 
+      : (slot?.teacherName || matchedTeacher?.name || existing?.teacherName || currentClass.teacherName);
+    const effectiveTeacherId = currentUser?.role === 'teacher'
+      ? currentUser.id
+      : (slot?.teacherId || matchedTeacher?.id || existing?.teacherId);
+
     if (existing) {
       // Only populate records for students who have no record entry at all (default to 'unmarked')
       let recordsUpdated = false;
@@ -683,13 +711,17 @@ export default function App() {
           };
         }
       });
-      if (recordsUpdated) {
-        return {
-          ...existing,
-          records
-        };
-      }
-      return existing;
+      // Synchronize with updated timetable slot & teacher respected subject
+      return {
+        ...existing,
+        sessionName: effectiveSessionName,
+        teacherName: effectiveTeacherName,
+        teacherId: effectiveTeacherId,
+        lectureSlotId: activeLectureSlotId || existing.lectureSlotId,
+        timeSlot: effectiveTimeSlot,
+        subject: effectiveSubject,
+        records
+      };
     }
 
     // Create session template if not found - students default to 'unmarked' (blank) until recorded
@@ -702,29 +734,22 @@ export default function App() {
       };
     });
 
-    const sessionName = activeSlot 
-      ? `${activeSlot.timeSlotLabel} - ${activeSlot.subject}`
-      : `${currentClass.name} Session`;
-
-    const teacherName = currentUser?.role === 'teacher' ? currentUser.name : (activeSlot?.teacherName || currentClass.teacherName);
-    const teacherId = currentUser?.role === 'teacher' ? currentUser.id : activeSlot?.teacherId;
-    const subject = activeSlot?.subject || (currentUser?.role === 'teacher' && currentUser.assignedSubjects?.[0] ? currentUser.assignedSubjects[0] : currentClass.subject);
-
     return {
       id: `${selectedClassId}_${selectedDate}_${activeLectureSlotId || 'general'}`,
       classId: selectedClassId,
       date: selectedDate,
-      sessionName,
-      teacherName,
-      teacherId,
+      dayOfWeek: getDayOfWeek(selectedDate),
+      sessionName: effectiveSessionName,
+      teacherName: effectiveTeacherName,
+      teacherId: effectiveTeacherId,
       lectureSlotId: activeLectureSlotId,
-      timeSlot: activeSlot?.timeSlotLabel,
-      subject,
+      timeSlot: effectiveTimeSlot,
+      subject: effectiveSubject,
       records: defaultRecords,
       lastUpdated: new Date().toISOString(),
       remarks: ''
     };
-  }, [sessions, selectedClassId, selectedDate, activeLectureSlotId, currentClass, activeSlot, currentUser, timetable]);
+  }, [sessions, selectedClassId, selectedDate, activeLectureSlotId, currentClass, activeSlot, currentUser, timetable, teachers]);
 
   const notifyUserChange = useCallback(() => {
     userHasModifiedDataRef.current = true;
@@ -1108,6 +1133,158 @@ export default function App() {
       handleTabChange('dashboard'); // Navigate directly to Attendance Roster so the teacher can tick students!
     }
   };
+
+  // Synchronized Timetable Lecture Slot Update
+  const handleUpdateTimetableSlot = useCallback((updatedSlot: TimetableSlot) => {
+    notifyUserChange();
+    const nextTimetable = timetable.map(s => s.id === updatedSlot.id ? updatedSlot : s);
+    setTimetable(nextTimetable);
+    try {
+      localStorage.setItem(STORAGE_KEY_TIMETABLE, JSON.stringify(nextTimetable));
+    } catch (_) {}
+
+    // Synchronize all existing recorded sessions matching this slot so subject & session reflect immediately
+    const nextSessions = sessions.map(sess => {
+      if (sess.lectureSlotId === updatedSlot.id || (
+        sess.dayOfWeek === updatedSlot.dayOfWeek && 
+        sess.timeSlot === updatedSlot.timeSlotLabel && 
+        sess.classId === updatedSlot.classId
+      )) {
+        return {
+          ...sess,
+          subject: updatedSlot.subject,
+          sessionName: `${updatedSlot.timeSlotLabel} - ${updatedSlot.subject}`,
+          timeSlot: updatedSlot.timeSlotLabel,
+          teacherName: updatedSlot.teacherName,
+          teacherId: updatedSlot.teacherId,
+          lastUpdated: new Date().toISOString()
+        };
+      }
+      return sess;
+    });
+    setSessions(nextSessions);
+    try {
+      localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(nextSessions));
+    } catch (_) {}
+
+    dbService.saveEntireCampusState({
+      settings,
+      classes,
+      students,
+      teachers,
+      classrooms,
+      timetable: nextTimetable,
+      sessions: nextSessions,
+      holidays
+    }).catch(console.warn);
+
+    showToast(`Lecture "${updatedSlot.subject}" updated across timetable & messaging.`, 'success');
+  }, [timetable, sessions, settings, classes, students, teachers, classrooms, holidays, notifyUserChange]);
+
+  const handleAddTimetableSlot = useCallback((newSlot: TimetableSlot) => {
+    notifyUserChange();
+    const next = [...timetable, newSlot];
+    setTimetable(next);
+    try {
+      localStorage.setItem(STORAGE_KEY_TIMETABLE, JSON.stringify(next));
+    } catch (_) {}
+    dbService.saveEntireCampusState({
+      settings,
+      classes,
+      students,
+      teachers,
+      classrooms,
+      timetable: next,
+      sessions,
+      holidays
+    }).catch(console.warn);
+    showToast(`Lecture "${newSlot.subject}" scheduled into timetable.`, 'success');
+  }, [timetable, settings, classes, students, teachers, classrooms, sessions, holidays, notifyUserChange]);
+
+  const handleDeleteTimetableSlot = useCallback((id: string) => {
+    notifyUserChange();
+    const next = timetable.filter(s => s.id !== id);
+    setTimetable(next);
+    try {
+      localStorage.setItem(STORAGE_KEY_TIMETABLE, JSON.stringify(next));
+    } catch (_) {}
+    dbService.saveEntireCampusState({
+      settings,
+      classes,
+      students,
+      teachers,
+      classrooms,
+      timetable: next,
+      sessions,
+      holidays
+    }).catch(console.warn);
+    showToast('Timetable lecture removed.', 'info');
+  }, [timetable, settings, classes, students, teachers, classrooms, sessions, holidays, notifyUserChange]);
+
+  const handleUpdateTeacher = useCallback((updatedTeacher: Teacher) => {
+    notifyUserChange();
+    const nextTeachers = teachers.map(old => old.id === updatedTeacher.id ? updatedTeacher : old);
+    setTeachers(nextTeachers);
+    try {
+      localStorage.setItem(STORAGE_KEY_TEACHERS, JSON.stringify(nextTeachers));
+    } catch (_) {}
+
+    // Synchronize logged-in user profile if this is the active user
+    if (currentUser?.id === updatedTeacher.id) {
+      const updatedUser: AuthUser = {
+        ...currentUser,
+        name: updatedTeacher.name,
+        uniqueCode: updatedTeacher.uniqueCode,
+        department: updatedTeacher.department,
+        assignedSubjects: updatedTeacher.subjects,
+        email: updatedTeacher.email
+      };
+      setCurrentUser(updatedUser);
+    }
+
+    // Keep timetable slots for this teacher synchronized with their name
+    const nextTimetable = timetable.map(slot => {
+      if (slot.teacherId === updatedTeacher.id) {
+        return {
+          ...slot,
+          teacherName: updatedTeacher.name
+        };
+      }
+      return slot;
+    });
+    setTimetable(nextTimetable);
+    try {
+      localStorage.setItem(STORAGE_KEY_TIMETABLE, JSON.stringify(nextTimetable));
+    } catch (_) {}
+
+    // Synchronize session teacher names
+    const nextSessions = sessions.map(sess => {
+      if (sess.teacherId === updatedTeacher.id) {
+        return {
+          ...sess,
+          teacherName: updatedTeacher.name
+        };
+      }
+      return sess;
+    });
+    setSessions(nextSessions);
+    try {
+      localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(nextSessions));
+    } catch (_) {}
+
+    dbService.saveEntireCampusState({
+      settings,
+      classes,
+      students,
+      teachers: nextTeachers,
+      classrooms,
+      timetable: nextTimetable,
+      sessions: nextSessions,
+      holidays
+    }).catch(console.warn);
+
+    showToast(`Faculty "${updatedTeacher.name}" profile & respected subjects updated.`, 'success');
+  }, [teachers, currentUser, timetable, sessions, settings, classes, students, classrooms, holidays, notifyUserChange]);
 
   // Calculate Defaulters Count for Header Badge (Req 15 & 16)
   const defaultersCount = useMemo(() => {
@@ -1568,60 +1745,9 @@ export default function App() {
               teachers={teachers}
               classrooms={classrooms}
               classes={classes}
-              onUpdateTimetableSlot={(updatedSlot) => {
-                notifyUserChange();
-                const next = timetable.map(s => s.id === updatedSlot.id ? updatedSlot : s);
-                setTimetable(next);
-                try {
-                  localStorage.setItem(STORAGE_KEY_TIMETABLE, JSON.stringify(next));
-                } catch (_) {}
-                dbService.saveEntireCampusState({
-                  settings,
-                  classes,
-                  students,
-                  teachers,
-                  classrooms,
-                  timetable: next,
-                  sessions
-                }).catch(console.warn);
-                showToast(`Timetable lecture "${updatedSlot.subject}" updated.`, 'success');
-              }}
-              onAddTimetableSlot={(newSlot) => {
-                notifyUserChange();
-                const next = [...timetable, newSlot];
-                setTimetable(next);
-                try {
-                  localStorage.setItem(STORAGE_KEY_TIMETABLE, JSON.stringify(next));
-                } catch (_) {}
-                dbService.saveEntireCampusState({
-                  settings,
-                  classes,
-                  students,
-                  teachers,
-                  classrooms,
-                  timetable: next,
-                  sessions
-                }).catch(console.warn);
-                showToast(`Lecture "${newSlot.subject}" scheduled.`, 'success');
-              }}
-              onDeleteTimetableSlot={(slotId) => {
-                notifyUserChange();
-                const next = timetable.filter(s => s.id !== slotId);
-                setTimetable(next);
-                try {
-                  localStorage.setItem(STORAGE_KEY_TIMETABLE, JSON.stringify(next));
-                } catch (_) {}
-                dbService.saveEntireCampusState({
-                  settings,
-                  classes,
-                  students,
-                  teachers,
-                  classrooms,
-                  timetable: next,
-                  sessions
-                }).catch(console.warn);
-                showToast('Timetable lecture removed.', 'info');
-              }}
+              onUpdateTimetableSlot={handleUpdateTimetableSlot}
+              onAddTimetableSlot={handleAddTimetableSlot}
+              onDeleteTimetableSlot={handleDeleteTimetableSlot}
             />
           </div>
         )}
@@ -1721,23 +1847,7 @@ export default function App() {
               }).catch(console.warn);
               showToast(`Teacher ${t.name} added with code ${t.uniqueCode}`, 'success');
             }}
-            onUpdateTeacher={(t) => {
-              notifyUserChange();
-              const next = teachers.map(old => old.id === t.id ? t : old);
-              setTeachers(next);
-              try {
-                localStorage.setItem(STORAGE_KEY_TEACHERS, JSON.stringify(next));
-              } catch (_) {}
-              dbService.saveEntireCampusState({
-                settings,
-                classes,
-                students,
-                teachers: next,
-                classrooms,
-                timetable,
-                sessions
-              }).catch(console.warn);
-            }}
+            onUpdateTeacher={handleUpdateTeacher}
             onDeleteTeacher={(id) => {
               notifyUserChange();
               const next = teachers.filter(t => t.id !== id);
@@ -1831,60 +1941,9 @@ export default function App() {
               showToast('Class group removed.', 'info');
             }}
             timetable={timetable}
-            onAddTimetableSlot={(s) => {
-              notifyUserChange();
-              const next = [...timetable, s];
-              setTimetable(next);
-              try {
-                localStorage.setItem(STORAGE_KEY_TIMETABLE, JSON.stringify(next));
-              } catch (_) {}
-              dbService.saveEntireCampusState({
-                settings,
-                classes,
-                students,
-                teachers,
-                classrooms,
-                timetable: next,
-                sessions
-              }).catch(console.warn);
-              showToast('Lecture scheduled into timetable.', 'success');
-            }}
-            onUpdateTimetableSlot={(updatedSlot) => {
-              notifyUserChange();
-              const next = timetable.map(s => s.id === updatedSlot.id ? updatedSlot : s);
-              setTimetable(next);
-              try {
-                localStorage.setItem(STORAGE_KEY_TIMETABLE, JSON.stringify(next));
-              } catch (_) {}
-              dbService.saveEntireCampusState({
-                settings,
-                classes,
-                students,
-                teachers,
-                classrooms,
-                timetable: next,
-                sessions
-              }).catch(console.warn);
-              showToast(`Lecture "${updatedSlot.subject}" updated.`, 'success');
-            }}
-            onDeleteTimetableSlot={(id) => {
-              notifyUserChange();
-              const next = timetable.filter(s => s.id !== id);
-              setTimetable(next);
-              try {
-                localStorage.setItem(STORAGE_KEY_TIMETABLE, JSON.stringify(next));
-              } catch (_) {}
-              dbService.saveEntireCampusState({
-                settings,
-                classes,
-                students,
-                teachers,
-                classrooms,
-                timetable: next,
-                sessions
-              }).catch(console.warn);
-              showToast('Timetable lecture removed.', 'info');
-            }}
+            onAddTimetableSlot={handleAddTimetableSlot}
+            onUpdateTimetableSlot={handleUpdateTimetableSlot}
+            onDeleteTimetableSlot={handleDeleteTimetableSlot}
             students={students}
             onAddStudent={(newSt, targetClassId) => {
               notifyUserChange();
@@ -1929,6 +1988,9 @@ export default function App() {
         session={currentSession}
         currentClass={currentClass}
         students={students}
+        timetable={timetable}
+        teachers={teachers}
+        activeSlot={activeSlot}
       />
 
       {/* Footer */}

@@ -19,7 +19,12 @@ export function generateWhatsAppMessage(
   session: AttendanceSession,
   classGroup: ClassGroup,
   students: Student[],
-  config: WhatsAppMessageConfig
+  config: WhatsAppMessageConfig,
+  overrides?: {
+    subject?: string;
+    timeSlot?: string;
+    teacherName?: string;
+  }
 ): string {
   const classStudents = students.filter(s => classGroup.studentIds.includes(s.id));
   const total = classStudents.length;
@@ -54,13 +59,41 @@ export function generateWhatsAppMessage(
 
   const readableDate = formatDateReadable(session.date);
 
+  // 1. Resolve exact subject: Prioritize overrides, session subject, extracted from sessionName, then classGroup
+  let effectiveSubject = (overrides?.subject || session.subject || '').trim();
+  if (!effectiveSubject && session.sessionName) {
+    if (session.sessionName.includes(' - ')) {
+      const parts = session.sessionName.split(' - ');
+      effectiveSubject = parts.slice(1).join(' - ').trim();
+    }
+  }
+  if (!effectiveSubject) {
+    effectiveSubject = classGroup.subject || 'Engineering Lecture';
+  }
+
+  // 2. Resolve timing/session slot without embedding or confusing with the subject
+  let effectiveTimeSlot = (overrides?.timeSlot || session.timeSlot || '').trim();
+  if (!effectiveTimeSlot && session.sessionName) {
+    if (session.sessionName.includes(' - ')) {
+      effectiveTimeSlot = session.sessionName.split(' - ')[0].trim();
+    } else {
+      effectiveTimeSlot = session.sessionName.trim();
+    }
+  }
+  if (!effectiveTimeSlot || effectiveTimeSlot.toLowerCase() === effectiveSubject.toLowerCase()) {
+    effectiveTimeSlot = 'Scheduled Lecture Hour';
+  }
+
+  // 3. Resolve faculty / teacher name
+  const effectiveTeacher = (overrides?.teacherName || session.teacherName || classGroup.teacherName || 'Faculty Member').trim();
+
   let message = `📋 *DAILY ATTENDANCE REPORT*\n`;
   message += `━━━━━━━━━━━━━━━━━━━━\n`;
   message += `🏫 *Class:* ${classGroup.name}\n`;
-  message += `📚 *Subject:* ${classGroup.subject}\n`;
+  message += `📚 *Subject:* ${effectiveSubject}\n`;
+  message += `⏰ *Session Timing:* ${effectiveTimeSlot}\n`;
   message += `📅 *Date:* ${readableDate}\n`;
-  message += `⏰ *Session:* ${session.sessionName}\n`;
-  message += `👨‍🏫 *Teacher:* ${session.teacherName || classGroup.teacherName}\n`;
+  message += `👨‍🏫 *Faculty:* ${effectiveTeacher}\n`;
   message += `━━━━━━━━━━━━━━━━━━━━\n\n`;
 
   if (config.includeStats) {
@@ -136,19 +169,23 @@ export function generateParentAlertMessage(
   student: Student,
   status: AttendanceStatus,
   dateStr: string,
-  classGroup: ClassGroup
+  classGroup: ClassGroup,
+  subject?: string,
+  timeSlot?: string
 ): string {
   const readableDate = formatDateReadable(dateStr);
   const statusLabel = status.toUpperCase();
+  const subjectDisplay = subject ? ` - ${subject}` : '';
+  const timeDisplay = timeSlot ? ` [${timeSlot}]` : '';
 
   let msg = `⚠️ *ATTENDANCE NOTICE*\n\n`;
   msg += `Dear Parent/Guardian of *${student.name}* (Roll #${student.rollNo}),\n\n`;
-  msg += `This is an official notice that ${student.name} was marked *${statusLabel}* for *${classGroup.name}* on *${readableDate}*.\n\n`;
+  msg += `This is an official notice that ${student.name} was marked *${statusLabel}* for *${classGroup.name}${subjectDisplay}*${timeDisplay} on *${readableDate}*.\n\n`;
   
   if (status === 'absent') {
     msg += `If you have already submitted a leave application or if this is an error, please contact the class teacher.\n\n`;
   } else if (status === 'late') {
-    msg += `Please ensure your ward reaches the school on time for the morning session.\n\n`;
+    msg += `Please ensure your ward reaches the school on time for the scheduled lecture.\n\n`;
   }
 
   msg += `Regards,\n*${classGroup.teacherName}*\n${classGroup.name}`;
@@ -159,12 +196,13 @@ export function generateAnalyticsReportMessage(
   classGroup: ClassGroup,
   avgRate: number,
   totalSessions: number,
-  defaulters: Student[]
+  defaulters: Student[],
+  subject?: string
 ): string {
   let msg = `📊 *ATTENDANCE ANALYTICS SUMMARY REPORT*\n`;
   msg += `━━━━━━━━━━━━━━━━━━━━\n`;
   msg += `🏫 *Class:* ${classGroup.name}\n`;
-  msg += `📚 *Subject:* ${classGroup.subject}\n`;
+  msg += `📚 *Subject:* ${subject || classGroup.subject}\n`;
   msg += `📈 *Class Attendance Average:* *${avgRate}%*\n`;
   msg += `📅 *Total Sessions Conducted:* *${totalSessions}*\n`;
   msg += `━━━━━━━━━━━━━━━━━━━━\n\n`;

@@ -35,7 +35,8 @@ import {
   ChevronRight,
   Shield,
   Layers,
-  Sparkle
+  Sparkle,
+  BookOpen
 } from 'lucide-react';
 import { 
   Teacher, 
@@ -199,10 +200,34 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
   const [newTeacherPhone, setNewTeacherPhone] = useState('+91');
   const [newTeacherDepartment, setNewTeacherDepartment] = useState(settings.departmentName || 'Department of Electronics And Computer Engineering');
   const [newTeacherSubjects, setNewTeacherSubjects] = useState('');
+  const [newSubjectChipInput, setNewSubjectChipInput] = useState('');
   const [showTeacherPasscodeInModal, setShowTeacherPasscodeInModal] = useState(false);
   const [visiblePasscodes, setVisiblePasscodes] = useState<Record<string, boolean>>({});
   const [facultySearchQuery, setFacultySearchQuery] = useState('');
   const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null);
+
+  const parsedTeacherSubjects = useMemo(() => {
+    return newTeacherSubjects
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+  }, [newTeacherSubjects]);
+
+  const handleAddSubjectToTeacher = (sub: string) => {
+    const trimmed = sub.trim();
+    if (!trimmed) return;
+    const current = newTeacherSubjects.split(',').map(s => s.trim()).filter(Boolean);
+    if (!current.some(s => s.toLowerCase() === trimmed.toLowerCase())) {
+      setNewTeacherSubjects([...current, trimmed].join(', '));
+    }
+    setNewSubjectChipInput('');
+  };
+
+  const handleRemoveSubjectFromTeacher = (subToRemove: string) => {
+    const current = newTeacherSubjects.split(',').map(s => s.trim()).filter(Boolean);
+    const filtered = current.filter(s => s.toLowerCase() !== subToRemove.toLowerCase());
+    setNewTeacherSubjects(filtered.join(', '));
+  };
 
   // Timetable Slot Form State
   const [selectedTimetableDay, setSelectedTimetableDay] = useState<'all' | DayOfWeek>('all');
@@ -375,7 +400,13 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
     setNewTeacherDepartment(t.department || deptName || settings.departmentName || 'Department of Electronics And Computer Engineering');
     setNewTeacherSubjects(t.subjects ? t.subjects.join(', ') : '');
     setShowTeacherPasscodeInModal(false);
-    setShowAddTeacherModal(true);
+    setShowAddTeacherModal(false); // Render inline directly at teacher card!
+    setTimeout(() => {
+      const el = document.getElementById(`teacher-card-${t.id}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }, 50);
   };
 
   // Open Add / Edit Timetable Slot Modals
@@ -413,6 +444,10 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
       .map(s => s.trim())
       .filter(Boolean);
 
+    const finalSubjects = subjectsArr.length > 0 
+      ? subjectsArr 
+      : (editingTeacher?.subjects && editingTeacher.subjects.length > 0 ? editingTeacher.subjects : ['Applied AI']);
+
     if (editingTeacher) {
       const updatedTeacher: Teacher = {
         ...editingTeacher,
@@ -422,7 +457,7 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
         email: newTeacherEmail.trim() || `${newTeacherCode.toLowerCase()}@dypatil.edu`,
         phone: newTeacherPhone.trim(),
         department: newTeacherDepartment.trim() || deptName,
-        subjects: subjectsArr.length > 0 ? subjectsArr : editingTeacher.subjects
+        subjects: finalSubjects
       };
       onUpdateTeacher(updatedTeacher);
       setEditingTeacher(null);
@@ -435,7 +470,7 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
         email: newTeacherEmail.trim() || `${newTeacherCode.toLowerCase()}@dypatil.edu`,
         phone: newTeacherPhone.trim(),
         department: newTeacherDepartment.trim() || deptName,
-        subjects: subjectsArr.length > 0 ? subjectsArr : ['General Engineering'],
+        subjects: finalSubjects,
         assignedClasses: [classes[0]?.id || 'class-1']
       };
       onAddTeacher(teacherObj);
@@ -448,6 +483,7 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
     setNewTeacherEmail('');
     setNewTeacherPhone('+91');
     setNewTeacherSubjects('');
+    setNewSubjectChipInput('');
   };
 
   // Handle Save Timetable Slot (Add / Edit)
@@ -782,6 +818,362 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
     );
   };
 
+  // Reusable Faculty Form Fields (Used for both Inline Editing directly in teacher card and Add Modal)
+  const renderFacultyFormFields = (isInline: boolean) => (
+    <div className="space-y-4">
+      <div className="space-y-1">
+        <label className="block text-xs font-bold text-slate-700">Faculty Full Name *</label>
+        <input
+          type="text"
+          value={newTeacherName}
+          onChange={(e) => setNewTeacherName(e.target.value)}
+          placeholder="e.g. Prof. Ramesh Deshmukh"
+          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/30"
+          required
+        />
+      </div>
+
+      {/* Unique Login Credentials Box */}
+      <div className="p-3.5 bg-emerald-50/60 rounded-2xl border border-emerald-200/90 space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] font-black uppercase tracking-wider text-emerald-900 flex items-center gap-1.5">
+            <Lock className="w-3.5 h-3.5 text-emerald-700" />
+            <span>Faculty Login Access</span>
+          </span>
+          <span className="text-[10px] text-emerald-700 font-medium">Immediate activation on save</span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <label className="block text-xs font-bold text-slate-700">Login Code *</label>
+            <input
+              type="text"
+              value={newTeacherCode}
+              onChange={(e) => setNewTeacherCode(e.target.value.toUpperCase())}
+              placeholder="e.g. TEACH101"
+              className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-black text-emerald-900 uppercase focus:outline-hidden focus:ring-2 focus:ring-emerald-500/30"
+              required
+            />
+            <p className="text-[10px] text-slate-500">Used as login username</p>
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-xs font-bold text-slate-700">Login Passcode / Password *</label>
+            <div className="relative flex items-center">
+              <input
+                type={showTeacherPasscodeInModal ? 'text' : 'password'}
+                value={newTeacherPasscode}
+                onChange={(e) => setNewTeacherPasscode(e.target.value)}
+                placeholder="e.g. teach123"
+                className="w-full bg-white border border-slate-300 rounded-xl pl-3 pr-9 py-2 text-xs font-mono font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/30"
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShowTeacherPasscodeInModal(!showTeacherPasscodeInModal)}
+                className="absolute right-2.5 text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+                title={showTeacherPasscodeInModal ? 'Hide passcode' : 'Show passcode'}
+              >
+                {showTeacherPasscodeInModal ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-500">Teacher's login password</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <label className="block text-xs font-bold text-slate-700">Email Address</label>
+          <input
+            type="email"
+            value={newTeacherEmail}
+            onChange={(e) => setNewTeacherEmail(e.target.value)}
+            placeholder="teacher@dypatil.edu"
+            className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/30"
+          />
+        </div>
+
+        <div className="space-y-1">
+          <label className="block text-xs font-bold text-slate-700">Phone (WhatsApp)</label>
+          <input
+            type="tel"
+            value={newTeacherPhone}
+            onChange={(e) => setNewTeacherPhone(e.target.value)}
+            placeholder="+91..."
+            className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/30"
+          />
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <label className="block text-xs font-bold text-slate-700">Assigned Department</label>
+        <input
+          type="text"
+          value={newTeacherDepartment}
+          onChange={(e) => setNewTeacherDepartment(e.target.value)}
+          placeholder="Department of Electronics And Computer Engineering"
+          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/30"
+        />
+      </div>
+
+      {/* Faculty's Respected Subjects & Specializations */}
+      <div className="p-3.5 bg-sky-50/70 rounded-2xl border border-sky-200 shadow-2xs space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <GraduationCap className="w-4 h-4 text-sky-700" />
+            <span className="text-xs font-black uppercase tracking-wider text-sky-900">
+              Respected Subjects & Specializations
+            </span>
+          </div>
+          <span className="text-[10px] text-sky-700 font-bold bg-sky-100/90 px-2 py-0.5 rounded-full border border-sky-200">
+            {parsedTeacherSubjects.length} {parsedTeacherSubjects.length === 1 ? 'subject' : 'subjects'}
+          </span>
+        </div>
+        <p className="text-[11px] text-slate-600 leading-snug">
+          Assign the subjects taught by this faculty member. These subjects directly appear in timetable slots, attendance registers, and WhatsApp broadcast messages.
+        </p>
+
+        {/* Assigned Subjects Badges */}
+        <div className="space-y-1.5">
+          <label className="block text-[11px] font-bold text-slate-700">Assigned Subjects:</label>
+          <div className="flex flex-wrap gap-1.5 min-h-[34px] p-2 bg-white rounded-xl border border-slate-200">
+            {parsedTeacherSubjects.length === 0 ? (
+              <span className="text-[11px] text-slate-400 italic">No subjects added yet. Add from palette or type below.</span>
+            ) : (
+              parsedTeacherSubjects.map((sub, idx) => (
+                <span
+                  key={idx}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-sky-100/90 text-sky-900 text-xs font-bold border border-sky-300 shadow-2xs"
+                >
+                  <span>{sub}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveSubjectFromTeacher(sub)}
+                    className="text-sky-600 hover:text-rose-600 rounded p-0.5 hover:bg-sky-200/60 transition-colors cursor-pointer"
+                    title={`Remove ${sub}`}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Quick Add Custom Subject Input */}
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={newSubjectChipInput}
+            onChange={(e) => setNewSubjectChipInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleAddSubjectToTeacher(newSubjectChipInput);
+              }
+            }}
+            placeholder="Type subject name (e.g. Applied AI, Cloud Computing)..."
+            className="flex-1 bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-900 font-medium placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-sky-500/40"
+          />
+          <button
+            type="button"
+            onClick={() => handleAddSubjectToTeacher(newSubjectChipInput)}
+            className="px-3 py-1.5 rounded-xl bg-sky-700 hover:bg-sky-800 text-white font-bold text-xs shadow-2xs cursor-pointer flex items-center gap-1 shrink-0"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Add Subject</span>
+          </button>
+        </div>
+
+        {/* 1-Click Popular Subjects Palette */}
+        <div className="space-y-1.5 pt-1 border-t border-sky-200/80">
+          <p className="text-[10px] font-bold text-sky-900">1-Click Departmental Subjects:</p>
+          <div className="flex flex-wrap gap-1">
+            {[
+              'Applied AI & Machine Learning',
+              'Cyber Security',
+              'Cloud Computing',
+              'Data Structures & Algorithms',
+              'Digital Signal Processing (DSP)',
+              'Embedded Systems & IoT',
+              'Computer Networks',
+              'Database Management Systems (DBMS)',
+              'VLSI Design',
+              'Operating Systems',
+              'Python Programming',
+              'Discrete Mathematics'
+            ].map(sub => {
+              const isAdded = parsedTeacherSubjects.some(s => s.toLowerCase() === sub.toLowerCase());
+              return (
+                <button
+                  key={sub}
+                  type="button"
+                  disabled={isAdded}
+                  onClick={() => handleAddSubjectToTeacher(sub)}
+                  className={`text-[10px] px-2 py-0.5 rounded-md font-medium transition-all ${
+                    isAdded
+                      ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                      : 'bg-white hover:bg-sky-100 text-slate-700 border border-slate-200 hover:border-sky-300 cursor-pointer active:scale-95'
+                  }`}
+                >
+                  {isAdded ? `✓ ${sub}` : `+ ${sub}`}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Optional Raw Input */}
+        <details className="text-[11px] text-slate-500 cursor-pointer pt-0.5">
+          <summary className="font-semibold text-slate-600 hover:text-slate-800">Edit raw comma-separated text</summary>
+          <input
+            type="text"
+            value={newTeacherSubjects}
+            onChange={(e) => setNewTeacherSubjects(e.target.value)}
+            placeholder="Subject 1, Subject 2, Subject 3"
+            className="mt-1.5 w-full bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-sky-500/40"
+          />
+        </details>
+      </div>
+
+      <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+        <button
+          type="button"
+          onClick={() => {
+            setShowAddTeacherModal(false);
+            setEditingTeacher(null);
+          }}
+          className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md cursor-pointer flex items-center gap-1.5"
+        >
+          <Save className="w-3.5 h-3.5" />
+          <span>{isInline || editingTeacher ? 'Save Faculty Changes' : 'Create Faculty Account'}</span>
+        </button>
+      </div>
+    </div>
+  );
+
+  // In-line Student Editor for HOD Tab 3
+  const renderHodStudentInlineForm = (student: Student) => (
+    <div className="bg-white p-4 sm:p-5 rounded-2xl border-2 border-emerald-500 shadow-xl ring-4 ring-emerald-500/15 space-y-4 animate-fadeIn my-1">
+      <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+        <div className="flex items-center gap-2">
+          <span className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-xs">
+            <GraduationCap className="w-4 h-4" />
+          </span>
+          <div>
+            <h4 className="text-xs font-extrabold text-slate-900">
+              Editing Student #{student.rollNo}: {student.name}
+            </h4>
+            <p className="text-[10px] text-slate-500 font-medium">Editing inline directly in roster — no scrolling needed</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setEditingStudent(null)}
+          className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 cursor-pointer"
+          title="Cancel"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      <form onSubmit={handleSaveStudent} className="space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+          <div className="space-y-1">
+            <label className="block text-[11px] font-bold text-slate-700">Roll No *</label>
+            <input
+              type="text"
+              value={newStudentRoll}
+              onChange={(e) => setNewStudentRoll(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-mono font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+              required
+            />
+          </div>
+          <div className="sm:col-span-2 space-y-1">
+            <label className="block text-[11px] font-bold text-slate-700">Full Name *</label>
+            <input
+              type="text"
+              value={newStudentName}
+              onChange={(e) => setNewStudentName(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+              required
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+          <div className="space-y-1">
+            <label className="block text-[11px] font-bold text-slate-700">Gender</label>
+            <select
+              value={newStudentGender}
+              onChange={(e) => setNewStudentGender(e.target.value as any)}
+              className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+            >
+              <option value="M">Male</option>
+              <option value="F">Female</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label className="block text-[11px] font-bold text-slate-700">Parent Name</label>
+            <input
+              type="text"
+              value={newStudentParent}
+              onChange={(e) => setNewStudentParent(e.target.value)}
+              placeholder="Guardian name"
+              className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="block text-[11px] font-bold text-slate-700">Parent WhatsApp</label>
+            <input
+              type="tel"
+              value={newStudentPhone}
+              onChange={(e) => setNewStudentPhone(e.target.value)}
+              placeholder="+91..."
+              className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-mono text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+        </div>
+
+        <div className="space-y-1">
+          <label className="block text-[11px] font-bold text-slate-700">Student Email</label>
+          <input
+            type="email"
+            value={newStudentEmail}
+            onChange={(e) => setNewStudentEmail(e.target.value)}
+            placeholder="student@dypatil.edu"
+            className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+          />
+        </div>
+
+        <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+          <button
+            type="button"
+            onClick={() => setEditingStudent(null)}
+            className="px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md cursor-pointer flex items-center gap-1"
+          >
+            <Check className="w-3.5 h-3.5" />
+            <span>Save Student Changes</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+
   return (
     <div className="w-full max-w-full min-w-0 flex flex-col lg:flex-row items-start gap-5 lg:gap-6">
       
@@ -1072,9 +1464,18 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
                       </tr>
                     ) : (
                       displayedStudents.map(student => {
+                        if (editingStudent && editingStudent.id === student.id) {
+                          return (
+                            <tr key={student.id} id={`hod-student-row-${student.id}`} className="bg-emerald-50/30">
+                              <td colSpan={6} className="p-3 sm:p-4">
+                                {renderHodStudentInlineForm(student)}
+                              </td>
+                            </tr>
+                          );
+                        }
                         const studentClasses = classes.filter(c => c.studentIds.includes(student.id));
                         return (
-                          <tr key={student.id} className="hover:bg-slate-50/80 transition-colors">
+                          <tr key={student.id} id={`hod-student-row-${student.id}`} className="hover:bg-slate-50/80 transition-colors">
                             <td className="py-3 px-4 font-mono font-bold text-slate-800 whitespace-nowrap">#{student.rollNo}</td>
                             <td className="py-3 px-4 font-bold text-slate-900 whitespace-nowrap">{student.name}</td>
                             <td className="py-3 px-4 text-slate-600 whitespace-nowrap">{student.gender}</td>
@@ -1109,7 +1510,11 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
                                     setNewStudentParent(student.parentName || '');
                                     setNewStudentPhone(student.parentPhone || '');
                                     setNewStudentEmail(student.email || '');
-                                    setShowAddStudentModal(true);
+                                    setShowAddStudentModal(false); // In-place edit directly at this row!
+                                    setTimeout(() => {
+                                      const el = document.getElementById(`hod-student-row-${student.id}`);
+                                      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                                    }, 50);
                                   }}
                                   className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
                                   title="Edit student details"
@@ -1378,10 +1783,48 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
                   );
                 })
                 .map(teacher => {
+                  if (editingTeacher && editingTeacher.id === teacher.id) {
+                    return (
+                      <div
+                        key={teacher.id}
+                        id={`teacher-card-${teacher.id}`}
+                        className="col-span-1 md:col-span-2 bg-white rounded-3xl border-2 border-emerald-500 p-5 sm:p-6 shadow-xl space-y-4 ring-4 ring-emerald-500/10 animate-fadeIn"
+                      >
+                        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-9 h-9 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold">
+                              <Users className="w-5 h-5" />
+                            </div>
+                            <div>
+                              <h3 className="text-base font-extrabold text-slate-900">
+                                Edit Faculty Profile & Respected Subjects
+                              </h3>
+                              <p className="text-xs text-slate-500">
+                                Editing profile, credentials & academic subjects for {editingTeacher.name} (Directly at this place)
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setEditingTeacher(null)}
+                            className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 cursor-pointer"
+                            title="Cancel editing"
+                          >
+                            <X className="w-5 h-5" />
+                          </button>
+                        </div>
+
+                        <form onSubmit={handleSaveNewTeacher} className="space-y-4">
+                          {renderFacultyFormFields(true)}
+                        </form>
+                      </div>
+                    );
+                  }
                   const isPassVisible = !!visiblePasscodes[teacher.id];
                   return (
                     <div 
                       key={teacher.id}
+                      id={`teacher-card-${teacher.id}`}
                       className="bg-white rounded-3xl border border-slate-200 p-4 sm:p-5 shadow-xs space-y-3.5 hover:border-emerald-300 transition-all"
                     >
                       <div className="flex items-start justify-between gap-3">
@@ -2240,150 +2683,7 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
             </div>
 
             <form onSubmit={handleSaveNewTeacher} className="space-y-4">
-              <div className="space-y-1">
-                <label className="block text-xs font-bold text-slate-700">Faculty Full Name *</label>
-                <input
-                  type="text"
-                  value={newTeacherName}
-                  onChange={(e) => setNewTeacherName(e.target.value)}
-                  placeholder="e.g. Prof. Ramesh Deshmukh"
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/30"
-                  required
-                />
-              </div>
-
-              {/* Unique Login Credentials Box */}
-              <div className="p-3.5 bg-emerald-50/60 rounded-2xl border border-emerald-200/90 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-black uppercase tracking-wider text-emerald-900 flex items-center gap-1.5">
-                    <Lock className="w-3.5 h-3.5 text-emerald-700" />
-                    <span>Faculty Login Access</span>
-                  </span>
-                  <span className="text-[10px] text-emerald-700 font-medium">Immediate activation on save</span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="block text-xs font-bold text-slate-700">Login Code *</label>
-                    <input
-                      type="text"
-                      value={newTeacherCode}
-                      onChange={(e) => setNewTeacherCode(e.target.value.toUpperCase())}
-                      placeholder="e.g. TEACH101"
-                      className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-black text-emerald-900 uppercase focus:outline-hidden focus:ring-2 focus:ring-emerald-500/30"
-                      required
-                    />
-                    <p className="text-[10px] text-slate-500">Used as login username</p>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="block text-xs font-bold text-slate-700">Login Passcode / Password *</label>
-                    <div className="relative flex items-center">
-                      <input
-                        type={showTeacherPasscodeInModal ? 'text' : 'password'}
-                        value={newTeacherPasscode}
-                        onChange={(e) => setNewTeacherPasscode(e.target.value)}
-                        placeholder="e.g. teach123"
-                        className="w-full bg-white border border-slate-300 rounded-xl pl-3 pr-9 py-2 text-xs font-mono font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/30"
-                        required
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowTeacherPasscodeInModal(!showTeacherPasscodeInModal)}
-                        className="absolute right-2.5 text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
-                        title={showTeacherPasscodeInModal ? 'Hide passcode' : 'Show passcode'}
-                      >
-                        {showTeacherPasscodeInModal ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                      </button>
-                    </div>
-                    <p className="text-[10px] text-slate-500">Teacher's login password</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="block text-xs font-bold text-slate-700">Email Address</label>
-                  <input
-                    type="email"
-                    value={newTeacherEmail}
-                    onChange={(e) => setNewTeacherEmail(e.target.value)}
-                    placeholder="teacher@dypatil.edu"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/30"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="block text-xs font-bold text-slate-700">Phone (WhatsApp)</label>
-                  <input
-                    type="tel"
-                    value={newTeacherPhone}
-                    onChange={(e) => setNewTeacherPhone(e.target.value)}
-                    placeholder="+91..."
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/30"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-xs font-bold text-slate-700">Assigned Department</label>
-                <input
-                  type="text"
-                  value={newTeacherDepartment}
-                  onChange={(e) => setNewTeacherDepartment(e.target.value)}
-                  placeholder="Department of Electronics And Computer Engineering"
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/30"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-700">Assigned Subjects (comma-separated)</label>
-                <input
-                  type="text"
-                  value={newTeacherSubjects}
-                  onChange={(e) => setNewTeacherSubjects(e.target.value)}
-                  placeholder="e.g. AI, Cyber Security, Cloud Computing, DSP"
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/30"
-                />
-                {/* Suggested quick subject pills */}
-                <div className="flex flex-wrap gap-1 pt-1">
-                  {['AI & Machine Learning', 'Cyber Security', 'Cloud Computing', 'Data Structures', 'Embedded Systems', 'IoT'].map(sub => (
-                    <button
-                      key={sub}
-                      type="button"
-                      onClick={() => {
-                        const current = newTeacherSubjects.split(',').map(s => s.trim()).filter(Boolean);
-                        if (!current.includes(sub)) {
-                          setNewTeacherSubjects([...current, sub].join(', '));
-                        }
-                      }}
-                      className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 cursor-pointer"
-                    >
-                      + {sub}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowAddTeacherModal(false);
-                    setEditingTeacher(null);
-                  }}
-                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md cursor-pointer flex items-center gap-1.5"
-                >
-                  <Save className="w-3.5 h-3.5" />
-                  <span>{editingTeacher ? 'Save Faculty Changes' : 'Create Faculty Account'}</span>
-                </button>
-              </div>
+              {renderFacultyFormFields(false)}
             </form>
           </div>
         </div>
@@ -2443,6 +2743,30 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
                     className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-sky-500/30"
                     required
                   />
+                  {/* Selected Faculty's Respected Subjects */}
+                  {(() => {
+                    const selTeacher = teachers.find(t => t.id === newSlotTeacherId);
+                    if (!selTeacher || !selTeacher.subjects || selTeacher.subjects.length === 0) return null;
+                    return (
+                      <div className="flex flex-wrap items-center gap-1 pt-1">
+                        <span className="text-[10px] text-slate-500 font-medium">Faculty Subjects:</span>
+                        {selTeacher.subjects.map((sub, i) => (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => setNewSlotSubject(sub)}
+                            className={`text-[10px] px-2 py-0.5 rounded-md font-semibold border cursor-pointer transition-all ${
+                              newSlotSubject.toLowerCase() === sub.toLowerCase()
+                                ? 'bg-sky-600 text-white border-sky-600'
+                                : 'bg-white hover:bg-sky-50 text-slate-700 border-slate-200'
+                            }`}
+                          >
+                            {sub}
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -2518,7 +2842,14 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
                   <label className="block text-xs font-bold text-slate-700">Assigned Faculty</label>
                   <select
                     value={newSlotTeacherId}
-                    onChange={(e) => setNewSlotTeacherId(e.target.value)}
+                    onChange={(e) => {
+                      const tId = e.target.value;
+                      setNewSlotTeacherId(tId);
+                      const tObj = teachers.find(t => t.id === tId);
+                      if (tObj && tObj.subjects && tObj.subjects.length > 0 && !newSlotSubject) {
+                        setNewSlotSubject(tObj.subjects[0]);
+                      }
+                    }}
                     className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-sky-500/30"
                   >
                     {teachers.map(t => (

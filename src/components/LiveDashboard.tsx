@@ -224,7 +224,9 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
 
   const handleSendParentWhatsApp = (student: Student, status: AttendanceStatus, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    const msg = generateParentAlertMessage(student, status, session.date, currentClass);
+    const effectiveSubject = session.subject || currentLecture?.subject;
+    const effectiveTime = session.timeSlot || currentLecture?.timeSlotLabel;
+    const msg = generateParentAlertMessage(student, status, session.date, currentClass, effectiveSubject, effectiveTime);
     shareToWhatsApp(msg, student.parentPhone);
   };
 
