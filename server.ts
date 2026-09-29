@@ -233,6 +233,87 @@ app.get('/api/hod/verify', requireHodRole, (req: AuthenticatedRequest, res: Resp
   });
 });
 
+// 4. Multi-device Campus State Synchronization API
+const STATE_FILE_PATH = path.join(DATA_DIR, 'campus_state.json');
+
+app.get('/api/campus/state', (_req: Request, res: Response) => {
+  try {
+    if (fs.existsSync(STATE_FILE_PATH)) {
+      const raw = fs.readFileSync(STATE_FILE_PATH, 'utf-8');
+      if (raw && raw.trim()) {
+        const state = JSON.parse(raw);
+        return res.json({ success: true, state, source: 'server' });
+      }
+    }
+    return res.json({ success: true, state: null, source: 'none' });
+  } catch (err: any) {
+    console.warn('[Server] Error reading campus state:', err?.message || err);
+    return res.status(500).json({ error: 'Failed to read campus state' });
+  }
+});
+
+app.post('/api/campus/state', (req: Request, res: Response) => {
+  try {
+    const { state } = req.body;
+    if (!state || typeof state !== 'object') {
+      return res.status(400).json({ error: 'Invalid campus state payload' });
+    }
+    fs.writeFileSync(STATE_FILE_PATH, JSON.stringify(state, null, 2), 'utf-8');
+    return res.json({ success: true, updatedAt: new Date().toISOString() });
+  } catch (err: any) {
+    console.error('[Server] Error saving campus state:', err?.message || err);
+    return res.status(500).json({ error: 'Failed to save campus state' });
+  }
+});
+
+app.post('/api/campus/session', (req: Request, res: Response) => {
+  try {
+    const { session } = req.body;
+    if (!session || !session.date) {
+      return res.status(400).json({ error: 'Invalid session payload' });
+    }
+
+    let existingState: any = null;
+    if (fs.existsSync(STATE_FILE_PATH)) {
+      try {
+        const raw = fs.readFileSync(STATE_FILE_PATH, 'utf-8');
+        if (raw && raw.trim()) {
+          existingState = JSON.parse(raw);
+        }
+      } catch (_) {}
+    }
+
+    if (!existingState) {
+      existingState = { sessions: [] };
+    }
+    if (!Array.isArray(existingState.sessions)) {
+      existingState.sessions = [];
+    }
+
+    const sessions = existingState.sessions;
+    const matchIndex = sessions.findIndex((s: any) => 
+      s.id === session.id || (
+        s.classId === session.classId && 
+        s.date === session.date && 
+        (session.lectureSlotId ? s.lectureSlotId === session.lectureSlotId : true)
+      )
+    );
+
+    if (matchIndex >= 0) {
+      sessions[matchIndex] = session;
+    } else {
+      sessions.push(session);
+    }
+
+    existingState.sessions = sessions;
+    fs.writeFileSync(STATE_FILE_PATH, JSON.stringify(existingState, null, 2), 'utf-8');
+    return res.json({ success: true, session, totalSessions: sessions.length });
+  } catch (err: any) {
+    console.error('[Server] Error saving attendance session:', err?.message || err);
+    return res.status(500).json({ error: 'Failed to save attendance session' });
+  }
+});
+
 /* ========================================================================== */
 /*                           VITE / STATIC SERVING                            */
 /* ========================================================================== */

@@ -345,11 +345,11 @@ export default function App() {
     };
   }, [currentTab, isWhatsAppModalOpen, isImportModalOpen, currentUser]);
 
-  // Initialize Firebase Database Persistence & Real-time Bi-directional Cloud Sync
+  // Initialize Database Persistence & Real-time Bi-directional Cloud Sync (Managed on Supabase)
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
 
-    const bootstrapFirebase = async () => {
+    const bootstrapCloudDatabase = async () => {
       setCloudSyncing(true);
       try {
         await dbService.init();
@@ -485,12 +485,69 @@ export default function App() {
       }
     };
 
-    bootstrapFirebase();
+    bootstrapCloudDatabase();
 
     return () => {
       if (unsubscribe) unsubscribe();
     };
   }, []);
+
+  // Multi-device live sync: automatically pulls newly recorded attendance when user switches tabs or periodically
+  useEffect(() => {
+    let isCancelled = false;
+
+    const pullRemoteUpdates = async () => {
+      if (document.hidden || isRemoteUpdateRef.current) return;
+      try {
+        const remote = await dbService.loadCampusState();
+        if (isCancelled || !remote || isRemoteUpdateRef.current) return;
+
+        // Sync students if remote has more students (e.g. added on another device)
+        if (remote.students && remote.students.length > students.length) {
+          isRemoteUpdateRef.current = true;
+          setStudents(remote.students);
+          setTimeout(() => { isRemoteUpdateRef.current = false; }, 300);
+        }
+
+        // Sync sessions cleanly without resurrecting deleted ones
+        if (remote.sessions && Array.isArray(remote.sessions)) {
+          const cleanRemote = remote.sessions.filter(isValidRecordedSession);
+          // Only update if remote actually has different session data
+          setSessions(prevLocal => {
+            const cleanPrev = prevLocal.filter(isValidRecordedSession);
+            const prevIds = new Set(cleanPrev.map(s => s.id));
+            const remoteIds = new Set(cleanRemote.map(s => s.id));
+            
+            // Check if identical
+            if (cleanPrev.length === cleanRemote.length && cleanPrev.every(s => remoteIds.has(s.id))) {
+              return prevLocal;
+            }
+
+            // Remote has different list - take authoritative cleanRemote
+            isRemoteUpdateRef.current = true;
+            setTimeout(() => { isRemoteUpdateRef.current = false; }, 400);
+            return cleanRemote;
+          });
+        }
+      } catch (_) {}
+    };
+
+    const interval = setInterval(pullRemoteUpdates, 7000);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        pullRemoteUpdates();
+      }
+    };
+    window.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleVisibility);
+
+    return () => {
+      isCancelled = true;
+      clearInterval(interval);
+      window.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleVisibility);
+    };
+  }, [students.length]);
 
   // Persistence to LocalStorage (Instant offline-first resilience, no circular loops)
   useEffect(() => {
@@ -1396,6 +1453,7 @@ export default function App() {
     // Immediate cloud push
     setCloudSyncing(true);
     try {
+      await dbService.saveSession(sessionToSave);
       await dbService.saveEntireCampusState({
         settings,
         classes,
@@ -1403,7 +1461,8 @@ export default function App() {
         teachers,
         classrooms,
         timetable,
-        sessions: nextSessions
+        sessions: nextSessions,
+        holidays
       });
       showToast(
         `Attendance for ${sessionDay}, ${selectedDate} saved permanently! (${presentCount} Present, ${absentCount} Absent) stored in cloud database.`,
@@ -1467,6 +1526,7 @@ export default function App() {
   // Clear all attendance for a specific date (HOD Authority)
   const handleClearDateAttendance = async (dateStr: string) => {
     notifyUserChange();
+    isRemoteUpdateRef.current = true;
     const filteredSessions = sessions.filter(s => s.date !== dateStr);
     setSessions(filteredSessions);
 
@@ -1483,7 +1543,8 @@ export default function App() {
         teachers,
         classrooms,
         timetable,
-        sessions: filteredSessions
+        sessions: filteredSessions,
+        holidays
       });
       lastSyncedHashRef.current = `${settings.collegeName}_${classes.length}_${students.length}_${filteredSessions.length}_${timetable.length}`;
       showToast(`Attendance records for ${dateStr} have been completely cleared and synced.`, 'success');
@@ -1492,12 +1553,14 @@ export default function App() {
       showToast(`Attendance records for ${dateStr} cleared locally.`, 'success');
     } finally {
       setCloudSyncing(false);
+      setTimeout(() => { isRemoteUpdateRef.current = false; }, 800);
     }
   };
 
   // Clear a specific lecture session
   const handleClearSession = async (sessionId: string) => {
     notifyUserChange();
+    isRemoteUpdateRef.current = true;
     const filteredSessions = sessions.filter(s => s.id !== sessionId);
     setSessions(filteredSessions);
 
@@ -1514,7 +1577,8 @@ export default function App() {
         teachers,
         classrooms,
         timetable,
-        sessions: filteredSessions
+        sessions: filteredSessions,
+        holidays
       });
       lastSyncedHashRef.current = `${settings.collegeName}_${classes.length}_${students.length}_${filteredSessions.length}_${timetable.length}`;
       showToast('Lecture attendance session record removed and synced.', 'info');
@@ -1523,6 +1587,7 @@ export default function App() {
       showToast('Lecture attendance session record removed.', 'info');
     } finally {
       setCloudSyncing(false);
+      setTimeout(() => { isRemoteUpdateRef.current = false; }, 800);
     }
   };
 

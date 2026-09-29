@@ -155,7 +155,11 @@ export function shareToWhatsApp(text: string, phone?: string): void {
   
   if (phone && phone.trim()) {
     // Clean phone number (strip spaces, dashes, parentheses)
-    const cleanPhone = phone.replace(/[^0-9+]/g, '').replace(/^\+/, '');
+    let cleanPhone = phone.replace(/[^0-9+]/g, '').replace(/^\+/, '');
+    // If it's a 10-digit Indian mobile number without country code, prefix 91
+    if (cleanPhone.length === 10) {
+      cleanPhone = '91' + cleanPhone;
+    }
     url = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedText}`;
   } else {
     // Universal WhatsApp share link that opens chat selector or WhatsApp Web
@@ -163,6 +167,156 @@ export function shareToWhatsApp(text: string, phone?: string): void {
   }
 
   window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+export type StudentIdentifierFormat = 'both' | 'name_only' | 'roll_only';
+export type RollListStyle = 'numbered' | 'inline';
+
+export interface AbsenteeBroadcastConfig {
+  format?: StudentIdentifierFormat;
+  rollListStyle?: RollListStyle;
+  includeStats?: boolean;
+  includeLectureDetails?: boolean;
+  customNote?: string;
+  subject?: string;
+  timeSlot?: string;
+  teacherName?: string;
+  collegeName?: string;
+  departmentName?: string;
+  totalEnrolled?: number;
+  presentCount?: number;
+}
+
+export function generateAbsentParentAlertMessage(
+  student: Student,
+  dateStr: string,
+  classGroup: ClassGroup,
+  format: StudentIdentifierFormat = 'both',
+  subject?: string,
+  timeSlot?: string,
+  teacherName?: string,
+  collegeName?: string,
+  customNote?: string
+): string {
+  const readableDate = formatDateReadable(dateStr);
+  const collegeHeader = collegeName ? `*${collegeName.toUpperCase()}*\n` : '';
+  const facultyLine = teacherName ? `\n👨‍🏫 *Faculty:* ${teacherName}` : '';
+  const timeDisplay = timeSlot ? ` [${timeSlot}]` : '';
+
+  let studentIdentifier = `*${student.name}* (Roll #${student.rollNo})`;
+  let studentRef = student.name;
+  if (format === 'name_only') {
+    studentIdentifier = `*${student.name}*`;
+    studentRef = student.name;
+  } else if (format === 'roll_only') {
+    studentIdentifier = `student with Roll #${student.rollNo}`;
+    studentRef = `Roll #${student.rollNo}`;
+  }
+
+  let msg = `🚨 ${collegeHeader}*DAILY ABSENCE ALERT NOTICE*\n\n`;
+  msg += `Dear Parent/Guardian of ${studentIdentifier},\n\n`;
+  msg += `This is an official intimation from the college that your ward (${studentRef}) was marked *ABSENT* today for:\n`;
+  msg += `• *Class:* ${classGroup.name}\n`;
+  if (subject) msg += `• *Subject:* ${subject}${timeDisplay}\n`;
+  msg += `• *Date:* ${readableDate}${facultyLine}\n\n`;
+  
+  if (customNote && customNote.trim()) {
+    msg += `📝 *Note from Faculty:* ${customNote.trim()}\n\n`;
+  }
+
+  msg += `If you have already submitted an official leave application or if this is an unforeseen emergency, kindly notify the faculty/department coordinator.\n\n`;
+  msg += `Regards,\n*${teacherName || classGroup.teacherName || 'Department Faculty'}*\n${collegeName || classGroup.name}`;
+  return msg;
+}
+
+export function generateAbsenteeBroadcastMessage(
+  absentStudents: Student[],
+  dateStr: string,
+  classGroup: ClassGroup,
+  formatOrConfig: StudentIdentifierFormat | AbsenteeBroadcastConfig = 'both',
+  subjectArg?: string,
+  timeSlotArg?: string,
+  teacherNameArg?: string,
+  collegeNameArg?: string
+): string {
+  // Normalize args to config
+  let config: AbsenteeBroadcastConfig = {};
+  if (typeof formatOrConfig === 'string') {
+    config = {
+      format: formatOrConfig,
+      subject: subjectArg,
+      timeSlot: timeSlotArg,
+      teacherName: teacherNameArg,
+      collegeName: collegeNameArg
+    };
+  } else {
+    config = formatOrConfig || {};
+  }
+
+  const format: StudentIdentifierFormat = config.format || 'both';
+  const rollListStyle: RollListStyle = config.rollListStyle || 'numbered';
+  const readableDate = formatDateReadable(dateStr);
+  const collegeHeader = config.collegeName ? `🏛️ *${config.collegeName.toUpperCase()}*\n` : '';
+  
+  const subject = config.subject;
+  const timeSlot = config.timeSlot;
+  const teacherName = config.teacherName;
+  const includeStats = config.includeStats ?? true;
+
+  let msg = `🚨 ${collegeHeader}*OFFICIAL ABSENT STUDENTS NOTICE*\n`;
+  msg += `━━━━━━━━━━━━━━━━━━━━\n`;
+  msg += `🏫 *Class:* ${classGroup.name}\n`;
+  if (subject) msg += `📚 *Subject:* ${subject}\n`;
+  if (timeSlot) msg += `⏰ *Lecture Slot:* ${timeSlot}\n`;
+  msg += `📅 *Date:* ${readableDate}\n`;
+  if (teacherName) msg += `👨‍🏫 *Faculty:* ${teacherName}\n`;
+  msg += `❌ *Total Absent:* *${absentStudents.length} Students*\n`;
+
+  if (includeStats && config.totalEnrolled && config.totalEnrolled > 0) {
+    const present = config.presentCount ?? (config.totalEnrolled - absentStudents.length);
+    const rate = ((present / config.totalEnrolled) * 100).toFixed(1);
+    msg += `📊 *Attendance:* ${present}/${config.totalEnrolled} Present (${rate}%)\n`;
+  }
+  msg += `━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+  if (absentStudents.length === 0) {
+    msg += `🎉 *100% ATTENDANCE TODAY!*\nAll students are present in this lecture.\n\n`;
+  } else {
+    // Sort absent students by roll number numerically if possible
+    const sortedStudents = [...absentStudents].sort((a, b) => {
+      const numA = parseInt(a.rollNo.replace(/\D/g, ''), 10);
+      const numB = parseInt(b.rollNo.replace(/\D/g, ''), 10);
+      if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+      return a.rollNo.localeCompare(b.rollNo, undefined, { numeric: true });
+    });
+
+    if (format === 'roll_only' && rollListStyle === 'inline') {
+      const rollList = sortedStudents.map(st => st.rollNo).join(', ');
+      msg += `📋 *Absent Roll Numbers (${sortedStudents.length}):*\n`;
+      msg += `${rollList}\n\n`;
+    } else {
+      msg += `*LIST OF ABSENT STUDENTS TODAY:*\n`;
+      sortedStudents.forEach((st, idx) => {
+        if (format === 'name_only') {
+          msg += `${idx + 1}. *${st.name}*\n`;
+        } else if (format === 'roll_only') {
+          msg += `${idx + 1}. Roll #${st.rollNo}\n`;
+        } else {
+          msg += `${idx + 1}. Roll #${st.rollNo} - *${st.name}*\n`;
+        }
+      });
+      msg += `\n`;
+    }
+  }
+
+  if (config.customNote && config.customNote.trim()) {
+    msg += `📝 *ANNOUNCEMENT / NOTE:*\n${config.customNote.trim()}\n\n`;
+  }
+
+  msg += `⚠️ _Parents of the above absent students are requested to acknowledge their ward's absence._\n`;
+  msg += `━━━━━━━━━━━━━━━━━━━━\n`;
+  msg += `_Generated via Campus Attendance System_`;
+  return msg;
 }
 
 export function generateParentAlertMessage(

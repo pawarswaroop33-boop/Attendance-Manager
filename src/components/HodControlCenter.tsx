@@ -36,7 +36,11 @@ import {
   Shield,
   Layers,
   Sparkle,
-  BookOpen
+  BookOpen,
+  FileSpreadsheet,
+  Download,
+  List,
+  LayoutGrid
 } from 'lucide-react';
 import { 
   Teacher, 
@@ -53,7 +57,8 @@ import {
 import { dbService } from '../services/databaseService';
 import { sha256Hex, evaluatePasswordStrength, sanitizeUsername } from '../utils/crypto';
 import { AttendanceCalendar } from './AttendanceCalendar';
-import { formatDateShort, isLegacyDummySession } from '../utils/dateUtils';
+import { formatDateShort, formatDateWithDay, isLegacyDummySession, getHolidayForDate, getTodayDateStr } from '../utils/dateUtils';
+import { exportMonthlyAttendanceToExcel } from '../utils/excelExport';
 
 export type HodSidebarSection = 
   | 'students' 
@@ -204,6 +209,7 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
   const [showTeacherPasscodeInModal, setShowTeacherPasscodeInModal] = useState(false);
   const [visiblePasscodes, setVisiblePasscodes] = useState<Record<string, boolean>>({});
   const [facultySearchQuery, setFacultySearchQuery] = useState('');
+  const [facultyViewMode, setFacultyViewMode] = useState<'cards' | 'table'>('table');
   const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null);
 
   const parsedTeacherSubjects = useMemo(() => {
@@ -248,8 +254,45 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
   const [newRoomCapacity, setNewRoomCapacity] = useState(70);
   const [newRoomType, setNewRoomType] = useState<'classroom' | 'lab' | 'seminar_hall'>('classroom');
 
-  // Attendance Log Calendar State
+  // Attendance Log Calendar State & Quick Clear Manager
   const [calendarSelectedDate, setCalendarSelectedDate] = useState<string | null>(null);
+  const [quickAuditDate, setQuickAuditDate] = useState<string>(() => getTodayDateStr());
+  const [showQuickClearModal, setShowQuickClearModal] = useState(false);
+  const [showQuickHolidayModal, setShowQuickHolidayModal] = useState(false);
+  const [quickHolidayTitle, setQuickHolidayTitle] = useState('');
+
+  // Monthly Attendance Excel Export State
+  const [showMonthlyExportModal, setShowMonthlyExportModal] = useState(false);
+  const [exportMonth, setExportMonth] = useState<number>(() => new Date().getMonth() + 1);
+  const [exportYear, setExportYear] = useState<number>(() => new Date().getFullYear());
+  const [exportClassId, setExportClassId] = useState<string>('all');
+  const [exportSubject, setExportSubject] = useState<string>('all');
+  const [exportSuccessNotice, setExportSuccessNotice] = useState<string | null>(null);
+
+  const handleTriggerMonthlyExcelExport = () => {
+    try {
+      exportMonthlyAttendanceToExcel(
+        {
+          year: exportYear,
+          month: exportMonth,
+          classId: exportClassId,
+          subjectFilter: exportSubject
+        },
+        classes,
+        students,
+        sessions,
+        settings,
+        holidays
+      );
+      setExportSuccessNotice('Monthly Attendance Excel (.xlsx) file downloaded successfully!');
+      setTimeout(() => {
+        setExportSuccessNotice(null);
+        setShowMonthlyExportModal(false);
+      }, 1600);
+    } catch (err: any) {
+      alert(`Export notice: ${err?.message || 'Could not export file'}`);
+    }
+  };
 
   // Confirmation Modals
   const [showResetCampusModal, setShowResetCampusModal] = useState(false);
@@ -400,13 +443,7 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
     setNewTeacherDepartment(t.department || deptName || settings.departmentName || 'Department of Electronics And Computer Engineering');
     setNewTeacherSubjects(t.subjects ? t.subjects.join(', ') : '');
     setShowTeacherPasscodeInModal(false);
-    setShowAddTeacherModal(false); // Render inline directly at teacher card!
-    setTimeout(() => {
-      const el = document.getElementById(`teacher-card-${t.id}`);
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      }
-    }, 50);
+    setShowAddTeacherModal(true); // Open in focused Modal Dialog (Zero scrolling!)
   };
 
   // Open Add / Edit Timetable Slot Modals
@@ -656,6 +693,48 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
   const cleanSessions = useMemo(() => {
     return sessions.filter(s => !isLegacyDummySession(s));
   }, [sessions]);
+
+  // Distinct recorded dates for quick jump and date clearing (sorted newest first)
+  const recordedDatesList = useMemo(() => {
+    const datesSet = new Set<string>();
+    cleanSessions.forEach(s => {
+      if (s.date) datesSet.add(s.date);
+    });
+    return Array.from(datesSet).sort((a, b) => b.localeCompare(a));
+  }, [cleanSessions]);
+
+  const quickDateSessions = useMemo(() => {
+    if (!quickAuditDate) return [];
+    return cleanSessions.filter(s => s.date === quickAuditDate);
+  }, [cleanSessions, quickAuditDate]);
+
+  const quickDateHoliday = useMemo(() => {
+    if (!quickAuditDate || !holidays) return null;
+    return getHolidayForDate(quickAuditDate, holidays);
+  }, [quickAuditDate, holidays]);
+
+  const quickDateStats = useMemo(() => {
+    let present = 0;
+    let absent = 0;
+    let total = 0;
+    quickDateSessions.forEach(sess => {
+      Object.values(sess?.records || {}).forEach((r: any) => {
+        if (r && r.status && r.status !== 'unmarked') {
+          total++;
+          if (r.status === 'present') present++;
+          else if (r.status === 'absent') absent++;
+          else if (r.status === 'late') present += 0.5;
+        }
+      });
+    });
+    const rate = total > 0 ? Math.round((present / total) * 100) : 0;
+    return {
+      present: Math.round(present),
+      absent,
+      total,
+      rate
+    };
+  }, [quickDateSessions]);
 
   // Department Analytics Calculations
   const analyticsData = useMemo(() => {
@@ -1360,14 +1439,14 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
           <div className="space-y-4 animate-fadeIn w-full min-w-0">
             {/* Top Action Banner */}
             <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200/90 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex items-center gap-2.5">
-                <span className="p-2 rounded-xl bg-amber-50 text-amber-600 border border-amber-200">
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <span className="p-2.5 rounded-xl bg-amber-50 text-amber-600 border border-amber-200 shrink-0 flex items-center justify-center">
                   <GraduationCap className="w-5 h-5" />
                 </span>
-                <div>
-                  <h2 className="text-base sm:text-lg font-black text-slate-900">Enrolled Students Roster</h2>
-                  <p className="text-xs text-slate-500">
-                    View, enroll, search, and manage student records across all division groups
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-base sm:text-lg font-black text-slate-900 leading-tight">Enrolled Students Roster</h2>
+                  <p className="text-xs text-slate-500 font-medium leading-normal mt-0.5 break-normal">
+                    Manage student profiles, enrollment, contact info and photos
                   </p>
                 </div>
               </div>
@@ -1412,32 +1491,82 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
               </div>
             </div>
 
-            {/* Filter and Search Bar */}
-            <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs flex flex-col sm:flex-row items-center gap-3">
-              <div className="w-full sm:w-60">
-                <select
-                  value={selectedStudentClassId}
-                  onChange={(e) => setSelectedStudentClassId(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-slate-900"
-                >
-                  <option value="all">All Classes & Divisions ({students.length})</option>
-                  {classes.map(c => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({c.studentIds.length} students)
-                    </option>
-                  ))}
-                </select>
+            {/* Filter, Search, and Quick Edit Bar */}
+            <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-1">
+                <div className="w-full sm:w-56">
+                  <select
+                    value={selectedStudentClassId}
+                    onChange={(e) => setSelectedStudentClassId(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-slate-900"
+                  >
+                    <option value="all">All Classes & Divisions ({students.length})</option>
+                    {classes.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} ({c.studentIds.length} students)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="relative flex-1 w-full">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={studentSearch}
+                    onChange={(e) => setStudentSearch(e.target.value)}
+                    placeholder="Search students by name, roll no, or phone..."
+                    className="w-full pl-9 pr-3.5 py-2 text-xs text-slate-900 bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-slate-900"
+                  />
+                  {studentSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setStudentSearch('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold p-1 cursor-pointer"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
               </div>
 
-              <div className="relative flex-1 w-full">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  type="text"
-                  value={studentSearch}
-                  onChange={(e) => setStudentSearch(e.target.value)}
-                  placeholder="Search students by name, roll no, or phone..."
-                  className="w-full pl-9 pr-3.5 py-2 text-xs text-slate-900 bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-slate-900"
-                />
+              {/* Quick Select & Edit Student (Zero scrolling!) */}
+              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl text-xs shrink-0 self-start md:self-auto">
+                <Edit3 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap">Edit Student:</span>
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const stId = e.target.value;
+                    if (!stId) return;
+                    const st = students.find(s => s.id === stId);
+                    if (st) {
+                      setEditingStudent(st);
+                      setNewStudentName(st.name);
+                      setNewStudentRoll(st.rollNo);
+                      setNewStudentGender(st.gender);
+                      setNewStudentParent(st.parentName || '');
+                      setNewStudentPhone(st.parentPhone || '');
+                      setNewStudentEmail(st.email || '');
+                      setShowAddStudentModal(true);
+                    }
+                  }}
+                  className="bg-transparent text-xs font-bold text-slate-800 focus:outline-hidden cursor-pointer max-w-[170px] truncate"
+                >
+                  <option value="">⚡ Quick Edit...</option>
+                  {[...displayedStudents]
+                    .sort((a, b) => {
+                      const numA = parseInt(a.rollNo.replace(/\D/g, ''), 10);
+                      const numB = parseInt(b.rollNo.replace(/\D/g, ''), 10);
+                      if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+                      return a.rollNo.localeCompare(b.rollNo);
+                    })
+                    .map(st => (
+                      <option key={st.id} value={st.id}>
+                        #{st.rollNo} - {st.name}
+                      </option>
+                    ))}
+                </select>
               </div>
             </div>
 
@@ -1464,15 +1593,6 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
                       </tr>
                     ) : (
                       displayedStudents.map(student => {
-                        if (editingStudent && editingStudent.id === student.id) {
-                          return (
-                            <tr key={student.id} id={`hod-student-row-${student.id}`} className="bg-emerald-50/30">
-                              <td colSpan={6} className="p-3 sm:p-4">
-                                {renderHodStudentInlineForm(student)}
-                              </td>
-                            </tr>
-                          );
-                        }
                         const studentClasses = classes.filter(c => c.studentIds.includes(student.id));
                         return (
                           <tr key={student.id} id={`hod-student-row-${student.id}`} className="hover:bg-slate-50/80 transition-colors">
@@ -1510,11 +1630,7 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
                                     setNewStudentParent(student.parentName || '');
                                     setNewStudentPhone(student.parentPhone || '');
                                     setNewStudentEmail(student.email || '');
-                                    setShowAddStudentModal(false); // In-place edit directly at this row!
-                                    setTimeout(() => {
-                                      const el = document.getElementById(`hod-student-row-${student.id}`);
-                                      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                                    }, 50);
+                                    setShowAddStudentModal(true); // Open in focused zero-scroll modal dialog!
                                   }}
                                   className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
                                   title="Edit student details"
@@ -1738,230 +1854,383 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={handleOpenAddTeacher}
-                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all shadow-sm cursor-pointer active:scale-95 shrink-0"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Add New Faculty</span>
-              </button>
-            </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Quick Edit Faculty Dropdown (Zero Scrolling!) */}
+                <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl text-xs">
+                  <Edit3 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap hidden sm:inline">Edit Faculty:</span>
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      const tId = e.target.value;
+                      if (!tId) return;
+                      const t = teachers.find(teach => teach.id === tId);
+                      if (t) {
+                        handleOpenEditTeacher(t);
+                      }
+                    }}
+                    className="bg-transparent text-xs font-bold text-slate-800 focus:outline-hidden cursor-pointer max-w-[170px] truncate"
+                  >
+                    <option value="">⚡ Quick Edit...</option>
+                    {teachers.map(t => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} ({t.uniqueCode})
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-            {/* Faculty Search Bar */}
-            <div className="flex items-center gap-2 bg-white px-3.5 py-2.5 rounded-2xl border border-slate-200/90 shadow-2xs">
-              <Search className="w-4 h-4 text-slate-400 shrink-0" />
-              <input
-                type="text"
-                value={facultySearchQuery}
-                onChange={(e) => setFacultySearchQuery(e.target.value)}
-                placeholder="Search faculty by name, login code, email, or subject..."
-                className="w-full bg-transparent text-xs font-semibold text-slate-900 focus:outline-hidden"
-              />
-              {facultySearchQuery && (
                 <button
                   type="button"
-                  onClick={() => setFacultySearchQuery('')}
-                  className="text-slate-400 hover:text-slate-600 p-1 rounded-md text-xs cursor-pointer"
+                  onClick={handleOpenAddTeacher}
+                  className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all shadow-sm cursor-pointer active:scale-95 shrink-0"
                 >
-                  <X className="w-3.5 h-3.5" />
+                  <Plus className="w-4 h-4" />
+                  <span>Add New Faculty</span>
                 </button>
-              )}
+              </div>
             </div>
 
-            {/* Teachers Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {teachers
-                .filter(t => {
-                  if (!facultySearchQuery.trim()) return true;
-                  const q = facultySearchQuery.toLowerCase();
-                  return (
-                    t.name.toLowerCase().includes(q) ||
-                    t.uniqueCode.toLowerCase().includes(q) ||
-                    (t.email && t.email.toLowerCase().includes(q)) ||
-                    (t.subjects && t.subjects.some(s => s.toLowerCase().includes(q)))
-                  );
-                })
-                .map(teacher => {
-                  if (editingTeacher && editingTeacher.id === teacher.id) {
+            {/* Faculty Search Bar & View Mode Toggle */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-slate-200/90 shadow-2xs">
+              <div className="flex items-center gap-2 flex-1">
+                <Search className="w-4 h-4 text-slate-400 shrink-0" />
+                <input
+                  type="text"
+                  value={facultySearchQuery}
+                  onChange={(e) => setFacultySearchQuery(e.target.value)}
+                  placeholder="Search faculty by name, login code, email, or subject..."
+                  className="w-full bg-transparent text-xs font-semibold text-slate-900 focus:outline-hidden"
+                />
+                {facultySearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setFacultySearchQuery('')}
+                    className="text-slate-400 hover:text-slate-600 p-1 rounded-md text-xs cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* View Mode Switcher: Compact Table (Zero Scroll) vs Cards */}
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs self-start sm:self-auto shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setFacultyViewMode('table')}
+                  className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all cursor-pointer flex items-center gap-1.5 ${
+                    facultyViewMode === 'table' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <List className="w-3.5 h-3.5" />
+                  <span>Compact Table</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFacultyViewMode('cards')}
+                  className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all cursor-pointer flex items-center gap-1.5 ${
+                    facultyViewMode === 'cards' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                  <span>Cards</span>
+                </button>
+              </div>
+            </div>
+
+            {/* COMPACT TABLE VIEW (Zero scrolling for faculty management) */}
+            {facultyViewMode === 'table' && (
+              <div className="bg-white rounded-3xl border border-slate-200/90 shadow-sm overflow-hidden w-full max-w-full min-w-0">
+                <div className="overflow-x-auto w-full max-w-full">
+                  <table className="w-full min-w-[700px] text-left text-xs">
+                    <thead className="bg-slate-100/80 text-slate-800 font-bold uppercase tracking-wider text-[11px] border-b border-slate-200 whitespace-nowrap">
+                      <tr>
+                        <th className="py-3 px-4">Faculty Member</th>
+                        <th className="py-3 px-4">Login Code</th>
+                        <th className="py-3 px-4">Passcode</th>
+                        <th className="py-3 px-4">Assigned Subjects</th>
+                        <th className="py-3 px-4">Contact</th>
+                        <th className="py-3 px-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {teachers
+                        .filter(t => {
+                          if (!facultySearchQuery.trim()) return true;
+                          const q = facultySearchQuery.toLowerCase();
+                          return (
+                            t.name.toLowerCase().includes(q) ||
+                            t.uniqueCode.toLowerCase().includes(q) ||
+                            (t.email && t.email.toLowerCase().includes(q)) ||
+                            (t.subjects && t.subjects.some(s => s.toLowerCase().includes(q)))
+                          );
+                        })
+                        .map(teacher => {
+                          const isPassVisible = !!visiblePasscodes[teacher.id];
+                          return (
+                            <tr key={teacher.id} className="hover:bg-slate-50/80 transition-colors">
+                              <td className="py-3 px-4">
+                                <div className="flex items-center gap-2.5">
+                                  <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center text-xs shrink-0 border border-emerald-200">
+                                    {teacher.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                                  </div>
+                                  <div>
+                                    <span className="font-bold text-slate-900 block">{teacher.name}</span>
+                                    <span className="text-[10px] text-slate-500">{teacher.department || deptName}</span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 whitespace-nowrap">
+                                <div className="inline-flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-lg">
+                                  <span className="font-mono font-bold text-emerald-800 text-xs">{teacher.uniqueCode}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => copyToClipboard(teacher.uniqueCode, `code-tbl-${teacher.id}`)}
+                                    className="text-slate-400 hover:text-emerald-700 cursor-pointer p-0.5"
+                                    title="Copy login code"
+                                  >
+                                    {copiedCodeId === `code-tbl-${teacher.id}` ? (
+                                      <Check className="w-3 h-3 text-emerald-600" />
+                                    ) : (
+                                      <Copy className="w-3 h-3" />
+                                    )}
+                                  </button>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 whitespace-nowrap">
+                                <div className="inline-flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-lg">
+                                  <span className="font-mono text-slate-800 text-xs font-semibold">
+                                    {isPassVisible ? teacher.passcode : '••••••••'}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setVisiblePasscodes(prev => ({ ...prev, [teacher.id]: !prev[teacher.id] }))}
+                                    className="text-slate-400 hover:text-slate-600 cursor-pointer p-0.5"
+                                    title={isPassVisible ? 'Hide passcode' : 'Show passcode'}
+                                  >
+                                    {isPassVisible ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => copyToClipboard(teacher.passcode, `pass-tbl-${teacher.id}`)}
+                                    className="text-slate-400 hover:text-emerald-700 cursor-pointer p-0.5"
+                                    title="Copy passcode"
+                                  >
+                                    {copiedCodeId === `pass-tbl-${teacher.id}` ? (
+                                      <Check className="w-3 h-3 text-emerald-600" />
+                                    ) : (
+                                      <Copy className="w-3 h-3" />
+                                    )}
+                                  </button>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="flex flex-wrap gap-1 max-w-xs">
+                                  {teacher.subjects && teacher.subjects.length > 0 ? (
+                                    teacher.subjects.map((sub, idx) => (
+                                      <span key={idx} className="px-2 py-0.5 rounded-md bg-sky-50 text-sky-800 text-[10px] font-semibold border border-sky-200">
+                                        {sub}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span className="text-[10px] text-slate-400 italic">None</span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 whitespace-nowrap">
+                                <span className="font-mono text-slate-700 block text-[11px]">{teacher.phone || '—'}</span>
+                                <span className="text-[10px] text-slate-400 truncate block max-w-[140px]">{teacher.email || '—'}</span>
+                              </td>
+                              <td className="py-3 px-4 text-right whitespace-nowrap">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditTeacher(teacher)}
+                                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-xs transition-all cursor-pointer shadow-2xs"
+                                    title="Edit faculty profile & login credentials"
+                                  >
+                                    <Edit3 className="w-3.5 h-3.5" />
+                                    <span>Edit</span>
+                                  </button>
+                                  {teachers.length > 1 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => onDeleteTeacher(teacher.id)}
+                                      className="p-1.5 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                                      title="Remove faculty member"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* CARDS VIEW */}
+            {facultyViewMode === 'cards' && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {teachers
+                  .filter(t => {
+                    if (!facultySearchQuery.trim()) return true;
+                    const q = facultySearchQuery.toLowerCase();
                     return (
-                      <div
+                      t.name.toLowerCase().includes(q) ||
+                      t.uniqueCode.toLowerCase().includes(q) ||
+                      (t.email && t.email.toLowerCase().includes(q)) ||
+                      (t.subjects && t.subjects.some(s => s.toLowerCase().includes(q)))
+                    );
+                  })
+                  .map(teacher => {
+                    const isPassVisible = !!visiblePasscodes[teacher.id];
+                    return (
+                      <div 
                         key={teacher.id}
                         id={`teacher-card-${teacher.id}`}
-                        className="col-span-1 md:col-span-2 bg-white rounded-3xl border-2 border-emerald-500 p-5 sm:p-6 shadow-xl space-y-4 ring-4 ring-emerald-500/10 animate-fadeIn"
+                        className="bg-white rounded-3xl border border-slate-200 p-4 sm:p-5 shadow-xs space-y-3.5 hover:border-emerald-300 transition-all"
                       >
-                        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-9 h-9 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold">
-                              <Users className="w-5 h-5" />
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center text-sm border border-emerald-200 shrink-0">
+                              {teacher.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
                             </div>
                             <div>
-                              <h3 className="text-base font-extrabold text-slate-900">
-                                Edit Faculty Profile & Respected Subjects
+                              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                                <span>{teacher.name}</span>
+                                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200">
+                                  {teacher.uniqueCode}
+                                </span>
                               </h3>
-                              <p className="text-xs text-slate-500">
-                                Editing profile, credentials & academic subjects for {editingTeacher.name} (Directly at this place)
-                              </p>
+                              <p className="text-xs text-slate-500">{teacher.email || `${teacher.uniqueCode.toLowerCase()}@dypatil.edu`}</p>
+                              {teacher.phone && (
+                                <p className="text-[11px] text-slate-400 font-mono">{teacher.phone}</p>
+                              )}
                             </div>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => setEditingTeacher(null)}
-                            className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 cursor-pointer"
-                            title="Cancel editing"
-                          >
-                            <X className="w-5 h-5" />
-                          </button>
-                        </div>
 
-                        <form onSubmit={handleSaveNewTeacher} className="space-y-4">
-                          {renderFacultyFormFields(true)}
-                        </form>
-                      </div>
-                    );
-                  }
-                  const isPassVisible = !!visiblePasscodes[teacher.id];
-                  return (
-                    <div 
-                      key={teacher.id}
-                      id={`teacher-card-${teacher.id}`}
-                      className="bg-white rounded-3xl border border-slate-200 p-4 sm:p-5 shadow-xs space-y-3.5 hover:border-emerald-300 transition-all"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center text-sm border border-emerald-200 shrink-0">
-                            {teacher.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
-                          </div>
-                          <div>
-                            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                              <span>{teacher.name}</span>
-                              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200">
-                                {teacher.uniqueCode}
-                              </span>
-                            </h3>
-                            <p className="text-xs text-slate-500">{teacher.email || `${teacher.uniqueCode.toLowerCase()}@dypatil.edu`}</p>
-                            {teacher.phone && (
-                              <p className="text-[11px] text-slate-400 font-mono">{teacher.phone}</p>
+                          {/* Top Card Actions: Edit & Delete */}
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditTeacher(teacher)}
+                              className="p-1.5 rounded-lg bg-slate-50 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 border border-slate-200 transition-colors cursor-pointer"
+                              title="Edit faculty overall details & login credentials"
+                            >
+                              <Edit3 className="w-4 h-4" />
+                            </button>
+                            {teachers.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => onDeleteTeacher(teacher.id)}
+                                className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"
+                                title="Remove teacher"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
                             )}
                           </div>
                         </div>
 
-                        {/* Top Card Actions: Edit & Delete */}
-                        <div className="flex items-center gap-1 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEditTeacher(teacher)}
-                            className="p-1.5 rounded-lg bg-slate-50 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 border border-slate-200 transition-colors cursor-pointer"
-                            title="Edit faculty overall details & login credentials"
-                          >
-                            <Edit3 className="w-4 h-4" />
-                          </button>
-                          {teachers.length > 1 && (
+                        {/* Unique Login Credentials Badge with Password Toggle */}
+                        <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <p className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1.5">
+                              <Lock className="w-3 h-3 text-slate-400" />
+                              <span>Faculty Login Credentials</span>
+                            </p>
                             <button
                               type="button"
-                              onClick={() => onDeleteTeacher(teacher.id)}
-                              className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"
-                              title="Remove teacher"
+                              onClick={() => handleOpenEditTeacher(teacher)}
+                              className="text-[10.5px] font-bold text-emerald-700 hover:text-emerald-800 hover:underline cursor-pointer flex items-center gap-1"
                             >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Unique Login Credentials Badge with Password Toggle */}
-                      <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <p className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1.5">
-                            <Lock className="w-3 h-3 text-slate-400" />
-                            <span>Faculty Login Credentials</span>
-                          </p>
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEditTeacher(teacher)}
-                            className="text-[10.5px] font-bold text-emerald-700 hover:text-emerald-800 hover:underline cursor-pointer flex items-center gap-1"
-                          >
-                            <Edit3 className="w-3 h-3" />
-                            <span>Edit Credentials</span>
-                          </button>
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                          {/* Login Code */}
-                          <div className="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-xl border border-slate-200">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[10.5px] text-slate-500 font-medium">Code:</span>
-                              <span className="font-mono font-black text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 text-xs">
-                                {teacher.uniqueCode}
-                              </span>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => copyToClipboard(teacher.uniqueCode, `code-${teacher.id}`)}
-                              className="p-1 rounded text-slate-400 hover:text-emerald-700 transition-colors cursor-pointer"
-                              title="Copy login code"
-                            >
-                              {copiedCodeId === `code-${teacher.id}` ? (
-                                <Check className="w-3.5 h-3.5 text-emerald-600" />
-                              ) : (
-                                <Copy className="w-3.5 h-3.5" />
-                              )}
+                              <Edit3 className="w-3 h-3" />
+                              <span>Edit Credentials</span>
                             </button>
                           </div>
 
-                          {/* Passcode with Show/Hide toggle */}
-                          <div className="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-xl border border-slate-200">
-                            <div className="flex items-center gap-1.5 min-w-0">
-                              <span className="text-[10.5px] text-slate-500 font-medium">Pass:</span>
-                              <span className="font-mono font-bold text-slate-800 text-xs truncate">
-                                {isPassVisible ? teacher.passcode : '••••••••'}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-0.5">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                            {/* Login Code */}
+                            <div className="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-xl border border-slate-200">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10.5px] text-slate-500 font-medium">Code:</span>
+                                <span className="font-mono font-black text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 text-xs">
+                                  {teacher.uniqueCode}
+                                </span>
+                              </div>
                               <button
                                 type="button"
-                                onClick={() => setVisiblePasscodes(prev => ({ ...prev, [teacher.id]: !prev[teacher.id] }))}
-                                className="p-1 rounded text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
-                                title={isPassVisible ? 'Hide password' : 'Show password'}
-                              >
-                                {isPassVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => copyToClipboard(teacher.passcode, `pass-${teacher.id}`)}
+                                onClick={() => copyToClipboard(teacher.uniqueCode, `code-${teacher.id}`)}
                                 className="p-1 rounded text-slate-400 hover:text-emerald-700 transition-colors cursor-pointer"
-                                title="Copy password"
+                                title="Copy login code"
                               >
-                                {copiedCodeId === `pass-${teacher.id}` ? (
+                                {copiedCodeId === `code-${teacher.id}` ? (
                                   <Check className="w-3.5 h-3.5 text-emerald-600" />
                                 ) : (
                                   <Copy className="w-3.5 h-3.5" />
                                 )}
                               </button>
                             </div>
+
+                            {/* Passcode with Show/Hide toggle */}
+                            <div className="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-xl border border-slate-200">
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span className="text-[10.5px] text-slate-500 font-medium">Pass:</span>
+                                <span className="font-mono font-bold text-slate-800 text-xs truncate">
+                                  {isPassVisible ? teacher.passcode : '••••••••'}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setVisiblePasscodes(prev => ({ ...prev, [teacher.id]: !prev[teacher.id] }))}
+                                  className="p-1 rounded text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                                  title={isPassVisible ? 'Hide passcode' : 'Show passcode'}
+                                >
+                                  {isPassVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => copyToClipboard(teacher.passcode, `pass-${teacher.id}`)}
+                                  className="p-1 rounded text-slate-400 hover:text-emerald-700 transition-colors cursor-pointer"
+                                  title="Copy password"
+                                >
+                                  {copiedCodeId === `pass-${teacher.id}` ? (
+                                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                  ) : (
+                                    <Copy className="w-3.5 h-3.5" />
+                                  )}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Respective Subjects */}
+                        <div className="space-y-1">
+                          <p className="text-[11px] font-bold text-slate-600">Assigned Subjects:</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {teacher.subjects && teacher.subjects.length > 0 ? (
+                              teacher.subjects.map((sub, idx) => (
+                                <span key={idx} className="px-2.5 py-0.5 rounded-lg bg-sky-50 text-sky-800 text-[11px] font-medium border border-sky-200">
+                                  {sub}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-[11px] text-slate-400 italic">No specific subjects assigned</span>
+                            )}
                           </div>
                         </div>
                       </div>
-
-                      {/* Respective Subjects */}
-                      <div className="space-y-1">
-                        <p className="text-[11px] font-bold text-slate-600">Assigned Subjects:</p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {teacher.subjects && teacher.subjects.length > 0 ? (
-                            teacher.subjects.map((sub, idx) => (
-                              <span key={idx} className="px-2.5 py-0.5 rounded-lg bg-sky-50 text-sky-800 text-[11px] font-medium border border-sky-200">
-                                {sub}
-                              </span>
-                            ))
-                          ) : (
-                            <span className="text-[11px] text-slate-400 italic">No specific subjects assigned</span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-            </div>
+                    );
+                  })}
+              </div>
+            )}
           </div>
         )}
 
@@ -2035,15 +2304,167 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
         {activeSection === 'attendance_log' && (
           <div className="space-y-4 animate-fadeIn w-full min-w-0">
             <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200/90 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-2.5">
-                <span className="p-2 rounded-xl bg-rose-50 text-rose-600 border border-rose-200">
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <span 
+                  style={{ height: '21.1px' }}
+                  className="p-2.5 rounded-xl bg-rose-50 text-rose-600 border border-rose-200 shrink-0 flex items-center justify-center"
+                >
                   <ClipboardList className="w-5 h-5" />
                 </span>
-                <div>
-                  <h2 className="text-base sm:text-lg font-black text-slate-900">Attendance Log & Date Clear Audit</h2>
-                  <p className="text-xs text-slate-500">
-                    Inspect recorded attendance sessions by date. Click any date on the calendar to view records or clear a specific day's attendance.
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-base sm:text-lg font-black text-slate-900 leading-tight">
+                    Attendance Log & Date Clear Audit
+                  </h2>
+                  <p 
+                    style={{ height: '40px', width: '300px' }}
+                    className="text-xs text-slate-500 font-medium leading-normal mt-0.5 break-normal"
+                  >
+                    Audit campus attendance records, clear dates & export monthly summaries
                   </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowMonthlyExportModal(true)}
+                className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 active:scale-95 text-white font-bold text-xs shadow-md transition-all cursor-pointer shrink-0"
+              >
+                <FileSpreadsheet className="w-4 h-4 text-emerald-200 shrink-0" />
+                <span>Export Monthly Attendance (Excel)</span>
+              </button>
+            </div>
+
+            {/* ZERO-SCROLL FAST DATE CLEAR & AUDIT MANAGER */}
+            <div className="bg-gradient-to-br from-slate-900 via-slate-850 to-slate-900 text-white p-4 sm:p-5 rounded-3xl border border-slate-700/80 shadow-md space-y-4">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-700/60">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center shrink-0">
+                    <Trash2 className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm sm:text-base font-extrabold text-white flex items-center gap-2">
+                      <span>⚡ Fast Date Clear & Attendance Manager</span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                        Zero Scrolling
+                      </span>
+                    </h3>
+                  </div>
+                </div>
+
+                {/* Quick Select from Recorded Dates Dropdown */}
+                {recordedDatesList.length > 0 && (
+                  <div className="flex items-center gap-2 bg-slate-800/90 border border-slate-700 rounded-2xl px-3 py-1.5 text-xs">
+                    <span className="text-slate-400 font-bold whitespace-nowrap">Recorded Dates:</span>
+                    <select
+                      value={recordedDatesList.includes(quickAuditDate) ? quickAuditDate : ''}
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          setQuickAuditDate(e.target.value);
+                          setCalendarSelectedDate(e.target.value);
+                        }
+                      }}
+                      className="bg-transparent text-white font-bold focus:outline-hidden cursor-pointer max-w-[210px] truncate"
+                    >
+                      <option value="" className="bg-slate-900 text-white">Select Date ({recordedDatesList.length})...</option>
+                      {recordedDatesList.map(dStr => {
+                        const count = cleanSessions.filter(s => s.date === dStr).length;
+                        return (
+                          <option key={dStr} value={dStr} className="bg-slate-900 text-white">
+                            {formatDateWithDay(dStr)} ({count} {count === 1 ? 'lecture' : 'lectures'})
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {/* Date Input & Status Bar */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-center">
+                {/* Left: Date Picker Input & Quick Today Button */}
+                <div className="lg:col-span-4 flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="date"
+                      value={quickAuditDate}
+                      onChange={(e) => {
+                        setQuickAuditDate(e.target.value);
+                        setCalendarSelectedDate(e.target.value);
+                      }}
+                      className="w-full pl-9 pr-3 py-2 bg-slate-800 border border-slate-600 rounded-xl text-xs font-bold text-white focus:outline-hidden focus:ring-2 focus:ring-rose-500 cursor-pointer"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const today = getTodayDateStr();
+                      setQuickAuditDate(today);
+                      setCalendarSelectedDate(today);
+                    }}
+                    className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap"
+                  >
+                    Today
+                  </button>
+                </div>
+
+                {/* Middle: Live Summary */}
+                <div className="lg:col-span-4 bg-slate-800/80 border border-slate-700 rounded-2xl p-2.5 px-3.5 flex items-center justify-between gap-2">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                      {formatDateWithDay(quickAuditDate)}
+                    </span>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      {quickDateHoliday ? (
+                        <span className="text-xs font-bold text-amber-300">🏖️ Holiday: {quickDateHoliday.title}</span>
+                      ) : quickDateSessions.length > 0 ? (
+                        <span className="text-xs font-bold text-emerald-400">
+                          {quickDateSessions.length} Recorded Lecture{quickDateSessions.length > 1 ? 's' : ''} ({quickDateStats.rate}% attendance)
+                        </span>
+                      ) : (
+                        <span className="text-xs font-semibold text-slate-400">No attendance records for this date</span>
+                      )}
+                    </div>
+                  </div>
+                  {quickDateSessions.length > 0 && (
+                    <div className="text-right text-[11px] font-mono shrink-0 pl-2 border-l border-slate-700">
+                      <span className="text-emerald-400 font-bold">{quickDateStats.present}P</span>
+                      <span className="text-slate-500 mx-1">/</span>
+                      <span className="text-rose-400 font-bold">{quickDateStats.absent}A</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Right: Direct Action Buttons (Zero Scrolling Clear) */}
+                <div className="lg:col-span-4 flex items-center justify-end gap-2 flex-wrap">
+                  {quickDateSessions.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowQuickClearModal(true)}
+                      className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-b from-rose-500 to-rose-600 hover:from-rose-600 hover:to-rose-700 active:scale-95 text-white font-bold text-xs shadow-md transition-all cursor-pointer border border-rose-400/50"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Clear Attendance for Date</span>
+                    </button>
+                  ) : (
+                    <span className="text-xs text-slate-400 font-medium italic">
+                      Zero records to clear
+                    </span>
+                  )}
+
+                  {(!quickDateHoliday || quickDateHoliday.declaredBy === 'System Default') && onDeclareHoliday && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickHolidayTitle(quickDateHoliday?.declaredBy === 'System Default' ? quickDateHoliday.title : '');
+                        setShowQuickHolidayModal(true);
+                      }}
+                      className="px-3 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <span>🏖️</span>
+                      <span>Declare Holiday</span>
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -2056,7 +2477,10 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
                 students={students}
                 settings={settings}
                 selectedDate={calendarSelectedDate}
-                onSelectDate={(dateStr) => setCalendarSelectedDate(dateStr)}
+                onSelectDate={(dateStr) => {
+                  setCalendarSelectedDate(dateStr);
+                  if (dateStr) setQuickAuditDate(dateStr);
+                }}
                 onExportSessionCSV={handleExportSessionCSV}
                 sendAbsentParentAlert={sendAbsentParentAlert}
                 onClearDateAttendance={onClearDateAttendance}
@@ -2074,7 +2498,7 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
         {/* SECTION 6: DEPARTMENT ANALYTICS */}
         {activeSection === 'analytics' && (
           <div className="space-y-4 animate-fadeIn w-full min-w-0">
-            <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200/90 shadow-sm">
+            <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200/90 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="flex items-center gap-2.5">
                 <span className="p-2 rounded-xl bg-teal-50 text-teal-600 border border-teal-200">
                   <BarChart3 className="w-5 h-5" />
@@ -2086,6 +2510,15 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
                   </p>
                 </div>
               </div>
+
+              <button
+                type="button"
+                onClick={() => setShowMonthlyExportModal(true)}
+                className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 active:scale-95 text-white font-bold text-xs shadow-md transition-all cursor-pointer shrink-0"
+              >
+                <FileSpreadsheet className="w-4 h-4 text-emerald-200" />
+                <span>Export Monthly Attendance (Excel)</span>
+              </button>
             </div>
 
             {/* Metrics Cards */}
@@ -2632,6 +3065,17 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
                 </div>
               </div>
 
+              <div className="space-y-1">
+                <label className="block text-xs font-bold text-slate-700">Student Email</label>
+                <input
+                  type="email"
+                  value={newStudentEmail}
+                  onChange={(e) => setNewStudentEmail(e.target.value)}
+                  placeholder="student@dypatil.edu"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900"
+                />
+              </div>
+
               <div className="flex items-center justify-end gap-2.5 pt-3">
                 <button
                   type="button"
@@ -3099,6 +3543,302 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
                 className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold cursor-pointer"
               >
                 Yes, Delete All
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: EXPORT MONTHLY ATTENDANCE TO EXCEL (.XLSX) */}
+      {showMonthlyExportModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white rounded-3xl p-6 sm:p-7 max-w-lg w-full shadow-2xl border border-slate-200 space-y-5 animate-scaleUp">
+            
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold border border-emerald-200 shadow-inner">
+                  <FileSpreadsheet className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    Export Monthly Attendance in Excel
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium">
+                    Download complete monthly register, defaulter sheet & session audits
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowMonthlyExportModal(false)}
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Filter Options */}
+            <div className="space-y-3.5">
+              
+              {/* Month and Year Selectors */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-slate-700">Select Month *</label>
+                  <select
+                    value={exportMonth}
+                    onChange={(e) => setExportMonth(parseInt(e.target.value, 10))}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+                  >
+                    {[
+                      { num: 1, name: 'January' },
+                      { num: 2, name: 'February' },
+                      { num: 3, name: 'March' },
+                      { num: 4, name: 'April' },
+                      { num: 5, name: 'May' },
+                      { num: 6, name: 'June' },
+                      { num: 7, name: 'July' },
+                      { num: 8, name: 'August' },
+                      { num: 9, name: 'September' },
+                      { num: 10, name: 'October' },
+                      { num: 11, name: 'November' },
+                      { num: 12, name: 'December' }
+                    ].map(m => (
+                      <option key={m.num} value={m.num}>{m.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-slate-700">Select Academic Year *</label>
+                  <select
+                    value={exportYear}
+                    onChange={(e) => setExportYear(parseInt(e.target.value, 10))}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+                  >
+                    {[2024, 2025, 2026, 2027, 2028].map(yr => (
+                      <option key={yr} value={yr}>{yr}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Class and Subject Selectors */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-slate-700">Class / Division</label>
+                  <select
+                    value={exportClassId}
+                    onChange={(e) => setExportClassId(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="all">All Enrolled Classes ({classes.length})</option>
+                    {classes.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-slate-700">Subject Filter</label>
+                  <select
+                    value={exportSubject}
+                    onChange={(e) => setExportSubject(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="all">All Subjects</option>
+                    {Array.from(new Set(timetable.map(s => s.subject).filter(Boolean))).map(sub => (
+                      <option key={sub} value={sub}>{sub}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Included Sheets Preview Card */}
+              <div className="p-3.5 bg-emerald-50/70 rounded-2xl border border-emerald-200 space-y-2 text-xs">
+                <span className="font-extrabold text-emerald-950 flex items-center gap-1.5">
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
+                  <span>Excel Workbook (.xlsx) Includes 3 Dedicated Sheets:</span>
+                </span>
+                <ul className="space-y-1 text-[11px] text-emerald-900 font-medium pl-1">
+                  <li className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
+                    <span><strong>Sheet 1: Monthly Attendance Matrix:</strong> Complete roll-call register with Present (P), Absent (A), Late (L) for every day + Total %</span>
+                  </li>
+                  <li className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-600" />
+                    <span><strong>Sheet 2: Defaulters List (&lt;{settings.defaulterThreshold || 75}%):</strong> Student names, parents & shortage percentages</span>
+                  </li>
+                  <li className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-sky-600" />
+                    <span><strong>Sheet 3: Conducted Sessions Audit:</strong> Timings, faculty in-charge & attendance ratios</span>
+                  </li>
+                </ul>
+              </div>
+
+              {/* Success Notification Banner */}
+              {exportSuccessNotice && (
+                <div className="p-3 bg-emerald-100 border border-emerald-300 text-emerald-950 rounded-xl text-xs font-bold flex items-center gap-2 animate-fadeIn">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{exportSuccessNotice}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowMonthlyExportModal(false)}
+                className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleTriggerMonthlyExcelExport}
+                className="px-5 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-extrabold flex items-center gap-2 shadow-md cursor-pointer active:scale-95 transition-all"
+              >
+                <Download className="w-4 h-4" />
+                <span>Download Excel Report (.xlsx)</span>
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRMATION MODAL: ZERO-SCROLL QUICK CLEAR ATTENDANCE FOR DATE */}
+      {showQuickClearModal && quickAuditDate && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl border border-slate-200 space-y-5 animate-scaleUp">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0 border border-rose-200">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-extrabold text-slate-900">
+                  Clear Attendance for {formatDateWithDay(quickAuditDate)}?
+                </h3>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Are you sure you want to permanently delete all <strong>{quickDateSessions.length}</strong> recorded lecture session(s) on <strong>{quickAuditDate}</strong>?
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl text-xs text-rose-800 font-semibold flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+              <span>
+                This will delete the attendance logs for this specific date across all classes and synchronize directly with the cloud database.
+              </span>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowQuickClearModal(false)}
+                className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onClearDateAttendance && quickAuditDate) {
+                    onClearDateAttendance(quickAuditDate);
+                    if (calendarSelectedDate === quickAuditDate) {
+                      setCalendarSelectedDate(null);
+                    }
+                  }
+                  setShowQuickClearModal(false);
+                }}
+                className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 active:scale-95 text-white text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-md"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Yes, Clear Attendance</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: ZERO-SCROLL QUICK DECLARE HOLIDAY */}
+      {showQuickHolidayModal && quickAuditDate && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-5 animate-scaleUp">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-amber-50 text-amber-700 border border-amber-200 flex items-center justify-center text-xl shadow-inner">
+                  🏖️
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900">Declare Official Holiday</h3>
+                  <p className="text-xs text-slate-500 font-semibold">{formatDateWithDay(quickAuditDate)}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowQuickHolidayModal(false)}
+                className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <label className="block text-xs font-extrabold text-slate-700">
+                Holiday Title / Occasion
+              </label>
+
+              {/* Quick Preset Buttons */}
+              <div className="flex flex-wrap gap-1.5 pt-0.5">
+                {[
+                  'Institutional Holiday',
+                  'Public / Festival Holiday',
+                  'College Annual Day / Event',
+                  'Departmental Event',
+                  'Semester Vacation'
+                ].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setQuickHolidayTitle(preset)}
+                    className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-[11px] font-bold transition-all cursor-pointer"
+                  >
+                    {preset}
+                  </button>
+                ))}
+              </div>
+
+              <input
+                type="text"
+                value={quickHolidayTitle}
+                onChange={(e) => setQuickHolidayTitle(e.target.value)}
+                placeholder="Enter holiday title e.g. Ganesh Chaturthi"
+                className="w-full bg-slate-50 border border-slate-300 rounded-2xl px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                autoFocus
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowQuickHolidayModal(false)}
+                className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onDeclareHoliday && quickAuditDate) {
+                    onDeclareHoliday(quickAuditDate, quickHolidayTitle || 'Declared Official Holiday');
+                  }
+                  setShowQuickHolidayModal(false);
+                }}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-b from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-white text-xs font-black transition-all shadow-md active:scale-95 cursor-pointer"
+              >
+                Declare Holiday
               </button>
             </div>
           </div>

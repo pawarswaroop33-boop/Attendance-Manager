@@ -86,9 +86,15 @@ class CampusDatabaseService {
 
   async init(): Promise<boolean> {
     try {
-      const success = await this.adapter.init();
-      this.isInitialized = true;
-      return success;
+      if (this.activeProvider === 'supabase') {
+        const success = await this.supabaseAdapter.init();
+        this.isInitialized = true;
+        return success;
+      } else {
+        const success = await this.firebaseAdapter.init();
+        this.isInitialized = true;
+        return success;
+      }
     } catch (e) {
       console.warn('Database service init warning:', e);
       return false;
@@ -97,11 +103,57 @@ class CampusDatabaseService {
 
   async loadCampusState(): Promise<CampusState | null> {
     try {
-      const primaryState = await this.adapter.loadCampusState();
-      if (primaryState && primaryState.students && primaryState.students.length > 0) {
-        return primaryState;
+      // 1. Fetch from server API first (instant multi-device sync across mobile & PC)
+      let serverState: CampusState | null = null;
+      try {
+        const resp = await fetch('/api/campus/state', { cache: 'no-store' });
+        if (resp.ok) {
+          const json = await resp.json();
+          if (json?.state && typeof json.state === 'object') {
+            serverState = json.state;
+          }
+        }
+      } catch (err) {
+        console.warn('[DatabaseService] Notice checking server state:', err);
       }
-      return primaryState;
+
+      // 2. Fetch directly from active cloud adapter (Supabase PostgreSQL - avoids Firestore reads)
+      let cloudState: CampusState | null = null;
+      try {
+        cloudState = await this.adapter.loadCampusState();
+      } catch (err) {
+        console.warn('[DatabaseService] Notice loading cloud state from active adapter:', err);
+      }
+
+      // If serverState exists and has campus state, it is authoritative for the active instance
+      const primaryState = serverState || cloudState;
+      if (!primaryState) return null;
+
+      // Select student roster from the richer state if one had full enrollment
+      const maxStudents = Math.max(
+        serverState?.students?.length || 0,
+        cloudState?.students?.length || 0
+      );
+      const chosenStudents = (serverState?.students?.length || 0) >= (cloudState?.students?.length || 0)
+        ? (serverState?.students || primaryState.students || [])
+        : (cloudState?.students || primaryState.students || []);
+
+      // Authoritative sessions from the primary state, strictly filtered to valid recorded sessions only
+      const rawSessions = Array.isArray(primaryState.sessions) ? primaryState.sessions : [];
+      const cleanSessions = rawSessions.filter(s => {
+        if (!s || typeof s !== 'object') return false;
+        // Check that at least one student was marked
+        const recs = s.records || {};
+        return Object.values(recs).some((r: any) => r && r.status && r.status !== 'unmarked');
+      });
+
+      const finalState: CampusState = {
+        ...primaryState,
+        students: chosenStudents,
+        sessions: cleanSessions
+      };
+
+      return finalState;
     } catch (e) {
       console.warn('loadCampusState notice:', e);
       return null;
@@ -109,8 +161,31 @@ class CampusDatabaseService {
   }
 
   async saveEntireCampusState(state: CampusState): Promise<void> {
-    // Save exclusively to the active provider (Supabase) - zero load on Firebase
-    await this.adapter.saveEntireCampusState(state);
+    // 1. Immediately persist to Server API (guarantees other devices see it in real-time)
+    const serverPromise = fetch('/api/campus/state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state })
+    }).catch(err => {
+      console.warn('[DatabaseService] Server state save notice:', err);
+    });
+
+    // 2. Persist to active Cloud Database (Supabase PostgreSQL - does NOT touch or burn Firestore quota)
+    const cloudPromises: Promise<any>[] = [];
+    try {
+      cloudPromises.push(this.adapter.saveEntireCampusState(state));
+    } catch (err) {
+      console.warn('[DatabaseService] Cloud adapter save notice:', err);
+    }
+
+    // Only save to Firebase if Firebase is explicitly the active provider
+    if (this.activeProvider === 'firebase' && !this.firebaseAdapter.isQuotaExhausted) {
+      try {
+        cloudPromises.push(this.firebaseAdapter.saveEntireCampusState(state));
+      } catch (_) {}
+    }
+
+    await Promise.allSettled([serverPromise, ...cloudPromises]);
   }
 
   async saveSettings(settings: SystemSettings): Promise<void> {
@@ -142,7 +217,24 @@ class CampusDatabaseService {
   }
 
   async saveSession(session: AttendanceSession): Promise<void> {
-    await this.adapter.saveSession(session);
+    // Immediate post to server session endpoint for cross-device reflection
+    const serverPromise = fetch('/api/campus/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session })
+    }).catch(err => {
+      console.warn('[DatabaseService] Server session push notice:', err);
+    });
+
+    // Persist session to active Cloud Database (Supabase PostgreSQL)
+    const cloudPromises: Promise<any>[] = [this.adapter.saveSession(session)];
+    
+    // Only save to Firebase if Firebase is explicitly the active provider
+    if (this.activeProvider === 'firebase' && !this.firebaseAdapter.isQuotaExhausted) {
+      cloudPromises.push(this.firebaseAdapter.saveSession(session));
+    }
+
+    await Promise.allSettled([serverPromise, ...cloudPromises]);
   }
 
   async deleteStudentPermanently(studentId: string): Promise<void> {

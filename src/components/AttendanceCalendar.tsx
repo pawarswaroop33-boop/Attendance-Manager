@@ -27,6 +27,8 @@ import {
   RotateCcw
 } from 'lucide-react';
 import { Student, ClassGroup, AttendanceSession, SystemSettings, AuthUser, TimetableSlot, Holiday } from '../types';
+import { AbsenteeBroadcastModal } from './AbsenteeBroadcastModal';
+import { shareToWhatsApp, generateAbsenteeBroadcastMessage, StudentIdentifierFormat } from '../utils/whatsapp';
 import {
   formatDateShort,
   formatDateWithDay,
@@ -115,6 +117,15 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
   // Expanded lecture card for viewing roster
   const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
   const [sessionRosterTab, setSessionRosterTab] = useState<'absent' | 'present' | 'all'>('absent');
+
+  // WhatsApp absentee broadcast modal state & format preference
+  const [absenteeBroadcastData, setAbsenteeBroadcastData] = useState<{
+    session: AttendanceSession;
+    absentStudents: Student[];
+    currentClass: ClassGroup;
+    sessionDay: string;
+  } | null>(null);
+  const [quickFormat, setQuickFormat] = useState<StudentIdentifierFormat>('both');
 
   // Filter sessions by class and strip dummy/mock sessions
   const classFilteredSessions = useMemo(() => {
@@ -368,6 +379,74 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
 
           </div>
         </div>
+
+        {/* IN-PLACE SELECTED DATE INSTANT ACTION BAR (ZERO SCROLLING) */}
+        {selectedDate && (
+          <div className="px-4 sm:px-6 py-3 bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 border-b border-slate-700/80 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fadeIn">
+            <div className="flex items-start sm:items-center gap-3 w-full sm:w-auto flex-1 min-w-0">
+              <span className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center justify-center shrink-0 mt-0.5 sm:mt-0">
+                <CalendarIcon className="w-4 h-4 text-emerald-400" />
+              </span>
+              <div className="flex-1 min-w-0 space-y-0.5">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-xs sm:text-sm font-black text-white leading-snug">
+                    {formatDateWithDay(selectedDate, selectedDateDayOfWeek)}
+                  </h3>
+                  {selectedDateHoliday && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-400/20 text-amber-300 border border-amber-400/40 shrink-0">
+                      🏖️ Holiday: {selectedDateHoliday.title}
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] sm:text-xs text-slate-300 leading-normal block whitespace-normal break-words">
+                  {selectedDateSessions.length > 0
+                    ? `${selectedDateSessions.length} recorded lecture${selectedDateSessions.length > 1 ? 's' : ''} • ${selectedDateSummary?.avgAttendanceRate || 0}% attendance (${selectedDateSummary?.totalPresent || 0} Present, ${selectedDateSummary?.totalAbsent || 0} Absent)`
+                    : 'No recorded attendance for this date'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto shrink-0 flex-wrap pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-800">
+              {/* HOD Direct Clear Button RIGHT IN PLACE */}
+              {currentUser?.role === 'hod' && selectedDateSessions.length > 0 && onClearDateAttendance && (
+                <button
+                  type="button"
+                  onClick={() => setConfirmClearDate(selectedDate)}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-b from-rose-500 to-rose-600 hover:from-rose-600 hover:to-rose-700 active:scale-95 text-white font-bold text-xs shadow-md transition-all cursor-pointer border border-rose-400/50 whitespace-nowrap"
+                  title="Clear all attendance records for this date without scrolling"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Clear Attendance for Date</span>
+                </button>
+              )}
+
+              {/* Teacher Take Attendance */}
+              {currentUser?.role === 'teacher' && hasScheduledLectureOnSelectedDate && onNavigateToSession && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const targetSlot = scheduledLecturesForSelectedDate[0];
+                    onNavigateToSession(targetSlot?.classId || classes[0]?.id || '', selectedDate, targetSlot?.id);
+                  }}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-b from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 active:scale-95 text-white font-bold text-xs shadow-md transition-all cursor-pointer border border-emerald-400/40 whitespace-nowrap"
+                >
+                  <PlusCircle className="w-3.5 h-3.5" />
+                  <span>Take Attendance</span>
+                </button>
+              )}
+
+              {/* Close date inspection */}
+              <button
+                type="button"
+                onClick={() => onSelectDate(null)}
+                className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors cursor-pointer ml-auto sm:ml-0"
+                title="Deselect Date"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Tactile Texture Calendar Grid Body */}
         <div className="p-2 sm:p-5 texture-dot-grid bg-slate-100/60 rounded-2xl border border-slate-200/80 shadow-[inset_0_2px_6px_rgba(0,0,0,0.04)] overflow-x-hidden w-full max-w-full min-w-0">
@@ -831,6 +910,27 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
                           {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                         </button>
 
+                        {/* Direct WhatsApp Share in Lecture Card Header (Zero Scrolling!) */}
+                        {stats.absentStudents.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setAbsenteeBroadcastData({
+                                session,
+                                absentStudents: stats.absentStudents,
+                                currentClass: cls || classes[0],
+                                sessionDay
+                              });
+                            }}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black text-white bg-[#25D366] hover:bg-[#1faa4f] shadow-xs active:scale-95 transition-all cursor-pointer whitespace-nowrap btn-tactile"
+                            title="Broadcast absent students or send WhatsApp notice without scrolling"
+                          >
+                            <Share2 className="w-3.5 h-3.5" />
+                            <span>WhatsApp Absent ({stats.absentStudents.length})</span>
+                          </button>
+                        )}
+
                         {/* Export CSV */}
                         <button
                           type="button"
@@ -951,9 +1051,9 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
                         </div>
                       </div>
 
-                      {/* Tab 1: Absent Students with WhatsApp Parent Alert */}
+                      {/* Tab 1: Absent Students with WhatsApp Parent Alert & Broadcast Bar */}
                       {sessionRosterTab === 'absent' && (
-                        <div>
+                        <div className="space-y-3.5">
                           {stats.absentStudents.length === 0 ? (
                             <div className="bg-white rounded-xl p-6 text-center border border-slate-200 space-y-1">
                               <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto" />
@@ -961,38 +1061,146 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
                               <p className="text-[11px] text-slate-500">100% full attendance recorded for this lecture.</p>
                             </div>
                           ) : (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                              {stats.absentStudents.map((st) => (
-                                <div
-                                  key={st.id}
-                                  className="bg-white rounded-xl p-3 border border-rose-200/80 shadow-2xs flex items-center justify-between gap-2"
-                                >
-                                  <div className="min-w-0">
-                                    <div className="flex items-center gap-1.5">
-                                      <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-rose-100 text-rose-800">
-                                        #{st.rollNo}
-                                      </span>
-                                      <span className="text-xs font-bold text-slate-900 truncate block">
-                                        {st.name}
-                                      </span>
+                            <>
+                              {/* Prominent WhatsApp Broadcast Bar at the TOP of absent students (Zero Scrolling!) */}
+                              <div className="bg-gradient-to-r from-rose-50/80 via-white to-emerald-50/80 p-3.5 sm:p-4 rounded-2xl border border-rose-200 shadow-xs space-y-3">
+                                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-2xl bg-[#25D366]/15 border border-[#25D366]/30 flex items-center justify-center shrink-0 text-[#25D366] shadow-2xs">
+                                      <Share2 className="w-5 h-5" />
                                     </div>
-                                    <span className="text-[11px] text-slate-500 block truncate mt-0.5 font-mono">
-                                      Parent: {st.parentPhone || 'No contact'}
-                                    </span>
+                                    <div>
+                                      <div className="flex items-center gap-2">
+                                        <h4 className="text-xs font-black text-slate-900">
+                                          WhatsApp Absentee Broadcast
+                                        </h4>
+                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-black bg-rose-100 text-rose-700 border border-rose-200">
+                                          {stats.absentStudents.length} Absent Students
+                                        </span>
+                                      </div>
+                                      <p className="text-[11px] text-slate-500 mt-0.5">
+                                        Broadcast absent message to WhatsApp of all students or notify parents individually.
+                                      </p>
+                                    </div>
                                   </div>
 
+                                  {/* Quick Format Selector Pills */}
+                                  <div className="flex items-center gap-1.5 bg-white border border-slate-200 p-1 rounded-xl shadow-2xs self-start md:self-auto">
+                                    <span className="text-[10px] font-bold text-slate-400 px-1 uppercase tracking-wider">Format:</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setQuickFormat('both')}
+                                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                                        quickFormat === 'both' ? 'bg-slate-900 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                                      }`}
+                                      title="Include both Roll Number and Name"
+                                    >
+                                      Roll + Name
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setQuickFormat('roll_only')}
+                                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                                        quickFormat === 'roll_only' ? 'bg-slate-900 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                                      }`}
+                                      title="Include Roll Number only"
+                                    >
+                                      Roll Only
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setQuickFormat('name_only')}
+                                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                                        quickFormat === 'name_only' ? 'bg-slate-900 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                                      }`}
+                                      title="Include Student Name only"
+                                    >
+                                      Name Only
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {/* Action Buttons Row */}
+                                <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-end gap-2.5">
+                                  {/* Quick One-Click Direct Broadcast */}
                                   <button
                                     type="button"
-                                    onClick={() => sendAbsentParentAlert(st, session, sessionDay)}
-                                    className="px-2.5 py-1.5 rounded-lg bg-[#25D366] hover:bg-[#1faa4f] text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer shrink-0 transition-all shadow-2xs"
-                                    title="Notify parent of today's absence via WhatsApp"
+                                    onClick={() => {
+                                      const text = generateAbsenteeBroadcastMessage(
+                                        stats.absentStudents,
+                                        session.date,
+                                        cls || classes[0],
+                                        {
+                                          format: quickFormat,
+                                          rollListStyle: 'numbered',
+                                          subject: session.subject,
+                                          timeSlot: session.timeSlot || session.sessionName,
+                                          teacherName: session.teacherName,
+                                          collegeName: settings.collegeName,
+                                          totalEnrolled: stats.total,
+                                          presentCount: stats.presentCount
+                                        }
+                                      );
+                                      shareToWhatsApp(text);
+                                    }}
+                                    className="px-4 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 shadow-2xs text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                                    title="Quickly send current broadcast message to WhatsApp chat selector"
                                   >
-                                    <Share2 className="w-3 h-3" />
-                                    <span>Notify</span>
+                                    <Share2 className="w-3.5 h-3.5 text-[#25D366]" />
+                                    <span>Quick Broadcast ({quickFormat === 'both' ? 'Roll & Name' : quickFormat === 'roll_only' ? 'Roll Only' : 'Name Only'})</span>
+                                  </button>
+
+                                  {/* Open Full Customization & Individual Modal */}
+                                  <button
+                                    type="button"
+                                    onClick={() => setAbsenteeBroadcastData({
+                                      session,
+                                      absentStudents: stats.absentStudents,
+                                      currentClass: cls || classes[0],
+                                      sessionDay
+                                    })}
+                                    className="px-5 py-2 rounded-xl bg-[#25D366] hover:bg-[#1faa4f] text-white text-xs font-black shadow-sm hover:shadow transition-all flex items-center gap-2 cursor-pointer active:scale-95"
+                                    title="Open WhatsApp Broadcast with format controls, student selection, or send individually"
+                                  >
+                                    <Share2 className="w-4 h-4" />
+                                    <span>Customize Broadcast & Send Individually</span>
                                   </button>
                                 </div>
-                              ))}
-                            </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-72 overflow-y-auto pr-1">
+                                {stats.absentStudents.map((st) => (
+                                  <div
+                                    key={st.id}
+                                    className="bg-white rounded-xl p-3 border border-rose-200/80 shadow-2xs flex items-center justify-between gap-2"
+                                  >
+                                    <div className="min-w-0">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-rose-100 text-rose-800">
+                                          #{st.rollNo}
+                                        </span>
+                                        <span className="text-xs font-bold text-slate-900 truncate block">
+                                          {st.name}
+                                        </span>
+                                      </div>
+                                      <span className="text-[11px] text-slate-500 block truncate mt-0.5 font-mono">
+                                        Parent: {st.parentPhone || 'No contact'}
+                                      </span>
+                                    </div>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => sendAbsentParentAlert(st, session, sessionDay)}
+                                      className="px-2.5 py-1.5 rounded-lg bg-[#25D366] hover:bg-[#1faa4f] text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer shrink-0 transition-all shadow-2xs"
+                                      title="Notify parent of today's absence via WhatsApp"
+                                    >
+                                      <Share2 className="w-3 h-3" />
+                                      <span>Notify</span>
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            </>
                           )}
                         </div>
                       )}
@@ -1269,6 +1477,21 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* ABSENTEE WHATSAPP BROADCAST MODAL */}
+      {absenteeBroadcastData && (
+        <AbsenteeBroadcastModal
+          isOpen={!!absenteeBroadcastData}
+          onClose={() => setAbsenteeBroadcastData(null)}
+          session={absenteeBroadcastData.session}
+          currentClass={absenteeBroadcastData.currentClass}
+          absentStudents={absenteeBroadcastData.absentStudents}
+          allStudents={students}
+          settings={settings}
+          sessionDay={absenteeBroadcastData.sessionDay}
+          timetable={timetable}
+        />
       )}
 
     </div>

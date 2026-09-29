@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   UserPlus, 
   Trash2, 
@@ -40,6 +40,9 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
   const [search, setSearch] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(20);
+  const [quickJumpStudentId, setQuickJumpStudentId] = useState('');
 
   // In-App Modal confirmation states (replacing window.confirm)
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
@@ -53,13 +56,28 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
   const [parentPhone, setParentPhone] = useState('');
   const [email, setEmail] = useState('');
 
-  const classStudents = students.filter(s => currentClass.studentIds.includes(s.id));
+  const classStudents = useMemo<Student[]>(() => {
+    return students.filter((s: Student) => currentClass.studentIds.includes(s.id));
+  }, [students, currentClass.studentIds]);
 
-  const filteredStudents = classStudents.filter(s => {
-    if (!search.trim()) return true;
-    const q = search.toLowerCase();
-    return s.name.toLowerCase().includes(q) || s.rollNo.includes(q) || s.parentName?.toLowerCase().includes(q);
-  });
+  const filteredStudents = useMemo<Student[]>(() => {
+    return classStudents.filter((s: Student) => {
+      if (!search.trim()) return true;
+      const q = search.toLowerCase();
+      return s.name.toLowerCase().includes(q) || s.rollNo.includes(q) || s.parentName?.toLowerCase().includes(q);
+    });
+  }, [classStudents, search]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, pageSize]);
+
+  const totalPages = pageSize === -1 ? 1 : Math.max(1, Math.ceil(filteredStudents.length / pageSize));
+  const paginatedStudents = useMemo<Student[]>(() => {
+    if (pageSize === -1) return filteredStudents;
+    const start = (currentPage - 1) * pageSize;
+    return filteredStudents.slice(start, start + pageSize);
+  }, [filteredStudents, currentPage, pageSize]);
 
   const resetForm = () => {
     setName('');
@@ -74,7 +92,7 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
 
   const handleStartAdd = () => {
     resetForm();
-    const maxRoll = classStudents.reduce((max, s) => {
+    const maxRoll = classStudents.reduce((max: number, s: Student) => {
       const num = parseInt(s.rollNo, 10);
       return !isNaN(num) && num > max ? num : max;
     }, 0);
@@ -91,15 +109,6 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
     setParentPhone(student.parentPhone || '');
     setEmail(student.email || '');
     setIsAdding(false);
-
-    // Scroll smoothly to exact place of this student
-    setTimeout(() => {
-      const el = document.getElementById(`student-edit-desktop-${student.id}`) || 
-                 document.getElementById(`student-edit-mobile-${student.id}`);
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      }
-    }, 50);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -154,153 +163,10 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
       onDeleteAllStudents(scope, currentClass.id);
     } else {
       // Fallback: remove all class students
-      classStudents.forEach(st => onRemoveStudentFromClass(st.id));
+      classStudents.forEach((st: Student) => onRemoveStudentFromClass(st.id));
     }
     setShowDeleteAllModal(false);
   };
-
-  const renderInlineStudentEditor = (student: Student, isMobile: boolean) => (
-    <div 
-      id={isMobile ? `student-edit-mobile-${student.id}` : `student-edit-desktop-${student.id}`}
-      className="bg-white p-4 sm:p-5 rounded-2xl border-2 border-emerald-500 shadow-xl ring-4 ring-emerald-500/15 space-y-4 animate-fadeIn my-1"
-    >
-      <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-xs shrink-0">
-            <GraduationCap className="w-4.5 h-4.5" />
-          </div>
-          <div>
-            <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
-              <span>Edit Student Profile</span>
-              <span className="font-mono text-xs px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200">
-                #{student.rollNo}
-              </span>
-            </h3>
-            <p className="text-[11px] text-slate-500 font-medium">
-              Editing right here at #{student.rollNo} {student.name} — no scrolling needed
-            </p>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={resetForm}
-          className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
-          title="Cancel editing"
-        >
-          <X className="w-4 h-4" />
-        </button>
-      </div>
-
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          <div className="space-y-1">
-            <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
-              Roll Number *
-            </label>
-            <input
-              type="text"
-              value={rollNo}
-              onChange={(e) => setRollNo(e.target.value)}
-              placeholder="e.g. 01"
-              className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
-              required
-            />
-          </div>
-
-          <div className="space-y-1 sm:col-span-1 lg:col-span-2">
-            <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
-              Full Student Name *
-            </label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Aarav Sharma"
-              className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
-              required
-            />
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
-              Gender
-            </label>
-            <div className="flex items-center gap-2 pt-1">
-              {(['M', 'F', 'Other'] as const).map(g => (
-                <label key={g} className="flex items-center gap-1.5 text-xs font-medium text-slate-700 cursor-pointer">
-                  <input
-                    type="radio"
-                    name={`gender-${student.id}`}
-                    value={g}
-                    checked={gender === g}
-                    onChange={() => setGender(g)}
-                    className="text-emerald-600 focus:ring-emerald-500"
-                  />
-                  <span>{g === 'M' ? 'Male' : g === 'F' ? 'Female' : 'Other'}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
-              Parent / Guardian Name
-            </label>
-            <input
-              type="text"
-              value={parentName}
-              onChange={(e) => setParentName(e.target.value)}
-              placeholder="e.g. Ramesh Sharma"
-              className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
-            />
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
-              Parent WhatsApp Contact
-            </label>
-            <input
-              type="tel"
-              value={parentPhone}
-              onChange={(e) => setParentPhone(e.target.value)}
-              placeholder="+919876543210"
-              className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
-            />
-          </div>
-
-          <div className="space-y-1 sm:col-span-2 lg:col-span-3">
-            <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
-              Student Email
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="student@dypatil.edu"
-              className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
-            />
-          </div>
-        </div>
-
-        <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-          <button
-            type="button"
-            onClick={resetForm}
-            className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-md cursor-pointer"
-          >
-            <Check className="w-3.5 h-3.5" />
-            <span>Save Changes</span>
-          </button>
-        </div>
-      </form>
-    </div>
-  );
 
   return (
     <div className="space-y-6">
@@ -316,9 +182,6 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
               {currentClass.name}
             </span>
           </div>
-          <p className="text-xs text-slate-500 font-medium mt-0.5">
-            Managing {classStudents.length} enrolled students. Add, edit profiles, or import via Excel/PDF.
-          </p>
         </div>
 
         <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 w-full sm:w-auto">
@@ -490,27 +353,88 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
         </div>
       )}
 
-      {/* Search and Filter Bar */}
-      <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-2">
+      {/* Search and Quick Edit Bar */}
+      <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
         <div className="relative flex-1">
-          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by student name, roll number, or parent contact..."
-            className="w-full pl-8 pr-3 py-1.5 text-xs text-slate-900 placeholder:text-slate-400 bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-slate-900"
+            className="w-full pl-8 pr-8 py-1.5 text-xs text-slate-900 placeholder:text-slate-400 bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-slate-900"
           />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold p-1 cursor-pointer"
+            >
+              ✕
+            </button>
+          )}
         </div>
-        {search && (
-          <button
-            type="button"
-            onClick={() => setSearch('')}
-            className="text-slate-400 hover:text-slate-600 text-xs font-semibold px-2 py-1 cursor-pointer"
-          >
-            Clear
-          </button>
-        )}
+
+        {/* Quick Edit Student Dropdown (Zero Scrolling!) */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-xl text-xs">
+            <Edit className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+            <span className="text-[11px] font-bold text-slate-500 hidden sm:inline whitespace-nowrap">Edit Student:</span>
+            <select
+              value={quickJumpStudentId}
+              onChange={(e) => {
+                const id = e.target.value;
+                if (!id) return;
+                const st = classStudents.find((s: Student) => s.id === id);
+                if (st) {
+                  handleStartEdit(st);
+                  setQuickJumpStudentId('');
+                }
+              }}
+              className="bg-transparent text-xs font-bold text-slate-800 focus:outline-hidden cursor-pointer max-w-[170px] truncate"
+            >
+              <option value="">⚡ Quick Edit...</option>
+              {[...classStudents]
+                .sort((a, b) => {
+                  const numA = parseInt(a.rollNo.replace(/\D/g, ''), 10);
+                  const numB = parseInt(b.rollNo.replace(/\D/g, ''), 10);
+                  if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+                  return a.rollNo.localeCompare(b.rollNo);
+                })
+                .map(st => (
+                  <option key={st.id} value={st.id}>
+                    #{st.rollNo} - {st.name}
+                  </option>
+                ))}
+            </select>
+          </div>
+
+          {/* Page size toggle */}
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-[11px]">
+            <span className="text-slate-500 font-bold px-1">Show:</span>
+            {[15, 25, 50].map(size => (
+              <button
+                key={size}
+                type="button"
+                onClick={() => { setPageSize(size); setCurrentPage(1); }}
+                className={`px-2 py-0.5 rounded-lg font-bold transition-all cursor-pointer ${
+                  pageSize === size ? 'bg-slate-900 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                {size}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => { setPageSize(-1); setCurrentPage(1); }}
+              className={`px-2 py-0.5 rounded-lg font-bold transition-all cursor-pointer ${
+                pageSize === -1 ? 'bg-slate-900 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              All
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Students Table / Grid */}
@@ -518,19 +442,12 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
         
         {/* Mobile Cards (Hidden on sm screens) */}
         <div className="block sm:hidden divide-y divide-slate-100">
-          {filteredStudents.length === 0 ? (
+          {paginatedStudents.length === 0 ? (
             <div className="p-8 text-center text-slate-500 text-xs">
               No students found. Use "Add Student" or "Scan Excel / PDF" to enroll students.
             </div>
           ) : (
-            filteredStudents.map(student => {
-              if (editingStudentId === student.id) {
-                return (
-                  <div key={student.id} className="p-2 sm:p-3">
-                    {renderInlineStudentEditor(student, true)}
-                  </div>
-                );
-              }
+            paginatedStudents.map(student => {
               return (
                 <div key={student.id} id={`student-card-mobile-${student.id}`} className="p-3.5 space-y-2 hover:bg-slate-50/50 transition-colors">
                   <div className="flex items-center justify-between">
@@ -595,23 +512,14 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredStudents.length === 0 ? (
+              {paginatedStudents.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-10 text-center text-slate-500 font-medium">
                     No students found in this roster. Click "Add Student" or "Scan Excel / PDF" to get started.
                   </td>
                 </tr>
               ) : (
-                filteredStudents.map(student => {
-                  if (editingStudentId === student.id) {
-                    return (
-                      <tr key={student.id} id={`student-edit-desktop-${student.id}`} className="bg-emerald-50/20">
-                        <td colSpan={6} className="p-3 sm:p-4">
-                          {renderInlineStudentEditor(student, false)}
-                        </td>
-                      </tr>
-                    );
-                  }
+                paginatedStudents.map(student => {
                   return (
                     <tr key={student.id} id={`student-row-desktop-${student.id}`} className="hover:bg-slate-50/80 transition-colors">
                       <td className="py-3.5 px-4 font-mono font-bold text-slate-800">#{student.rollNo}</td>
@@ -641,7 +549,7 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
                             type="button"
                             onClick={() => handleStartEdit(student)}
                             className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
-                            title="Edit student"
+                            title="Edit student profile"
                           >
                             <Edit className="w-3.5 h-3.5" />
                           </button>
@@ -663,6 +571,46 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
           </table>
         </div>
       </div>
+
+      {/* Pagination Controls Bar (Zero Doom Scrolling!) */}
+      {totalPages > 1 && (
+        <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3 text-xs">
+          <span className="text-slate-500 font-medium">
+            Showing <strong className="text-slate-900">{((currentPage - 1) * pageSize) + 1}</strong> to <strong className="text-slate-900">{Math.min(currentPage * pageSize, filteredStudents.length)}</strong> of <strong className="text-slate-900">{filteredStudents.length}</strong> students
+          </span>
+
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              disabled={currentPage === 1}
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              className="px-2.5 py-1 rounded-lg border border-slate-200 text-slate-700 disabled:opacity-40 font-bold hover:bg-slate-50 cursor-pointer disabled:cursor-not-allowed"
+            >
+              Prev
+            </button>
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => setCurrentPage(p)}
+                className={`w-7 h-7 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  currentPage === p ? 'bg-slate-900 text-white shadow-2xs' : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+            <button
+              type="button"
+              disabled={currentPage === totalPages}
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              className="px-2.5 py-1 rounded-lg border border-slate-200 text-slate-700 disabled:opacity-40 font-bold hover:bg-slate-50 cursor-pointer disabled:cursor-not-allowed"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* MODAL 1: CONFIRM SINGLE STUDENT DELETION (In-App Modal, No window.confirm) */}
       {studentToDelete && (
@@ -805,6 +753,143 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
           </div>
         </div>
       )}
+
+      {/* ZERO-SCROLL MODAL: EDIT STUDENT PROFILE (Zero scrolling required) */}
+      {editingStudentId && (() => {
+        const student = students.find(s => s.id === editingStudentId);
+        if (!student) return null;
+        return (
+          <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="bg-white rounded-3xl p-5 sm:p-7 max-w-lg w-full shadow-2xl border border-slate-200 space-y-4 animate-scaleUp max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-sm shrink-0 border border-emerald-200">
+                    <GraduationCap className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                      <span>Edit Student Profile</span>
+                      <span className="font-mono text-xs px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200">
+                        #{student.rollNo}
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-500 font-medium">
+                      Modifying profile details for {student.name} ({currentClass.name}) &bull; Zero scrolling
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 cursor-pointer transition-colors"
+                  title="Close edit modal"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Roll Number *</label>
+                    <input
+                      type="text"
+                      value={rollNo}
+                      onChange={(e) => setRollNo(e.target.value)}
+                      placeholder="e.g. 01"
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+                      required
+                    />
+                  </div>
+                  <div className="sm:col-span-2 space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Full Student Name *</label>
+                    <input
+                      type="text"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="e.g. Aarav Sharma"
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Gender</label>
+                    <div className="flex items-center gap-3 pt-1">
+                      {(['M', 'F', 'Other'] as const).map(g => (
+                        <label key={g} className="flex items-center gap-1.5 text-xs font-medium text-slate-700 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="edit-student-modal-gender"
+                            value={g}
+                            checked={gender === g}
+                            onChange={() => setGender(g)}
+                            className="text-emerald-600 focus:ring-emerald-500"
+                          />
+                          <span>{g === 'M' ? 'Male' : g === 'F' ? 'Female' : 'Other'}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Parent / Guardian Name</label>
+                    <input
+                      type="text"
+                      value={parentName}
+                      onChange={(e) => setParentName(e.target.value)}
+                      placeholder="e.g. Ramesh Sharma"
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Parent WhatsApp Phone</label>
+                    <input
+                      type="tel"
+                      value={parentPhone}
+                      onChange={(e) => setParentPhone(e.target.value)}
+                      placeholder="+919876543210"
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Student Email</label>
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="student@dypatil.edu"
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={resetForm}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-md cursor-pointer"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Save Student Changes</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );

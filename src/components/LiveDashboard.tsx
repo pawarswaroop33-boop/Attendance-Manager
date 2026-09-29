@@ -34,7 +34,13 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { AttendanceSession, ClassGroup, Student, AttendanceStatus, AuthUser, TimetableSlot, Holiday } from '../types';
-import { generateParentAlertMessage, shareToWhatsApp } from '../utils/whatsapp';
+import { 
+  generateParentAlertMessage, 
+  generateAbsentParentAlertMessage, 
+  generateAbsenteeBroadcastMessage, 
+  StudentIdentifierFormat, 
+  shareToWhatsApp 
+} from '../utils/whatsapp';
 import { formatDateWithDay, formatDateShort, getDayOfWeek, getTodayDateStr, getHolidayForDate, isValidRecordedSession } from '../utils/dateUtils';
 import { getNextLectureDateForUser } from '../utils/teacherFilter';
 
@@ -98,6 +104,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
   const [rollFeedback, setRollFeedback] = useState<{ message: string; type: 'success' | 'error'; student?: Student } | null>(null);
   const [isDeclareHolidayModalOpen, setIsDeclareHolidayModalOpen] = useState(false);
   const [holidayTitleInput, setHolidayTitleInput] = useState('');
+  const [absentFormat, setAbsentFormat] = useState<StudentIdentifierFormat>('both');
 
   const selectedDateHoliday = useMemo(() => {
     return getHolidayForDate(selectedDate, holidays);
@@ -125,6 +132,11 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
   const classStudents = useMemo(() => {
     return allStudents.filter(s => currentClass.studentIds.includes(s.id));
   }, [allStudents, currentClass]);
+
+  // List of students currently marked absent
+  const absentStudentsList = useMemo(() => {
+    return classStudents.filter(st => session?.records?.[st.id]?.status === 'absent');
+  }, [classStudents, session]);
 
   // Real-time calculation of counts
   const stats = useMemo(() => {
@@ -226,7 +238,55 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
     e?.stopPropagation();
     const effectiveSubject = session.subject || currentLecture?.subject;
     const effectiveTime = session.timeSlot || currentLecture?.timeSlotLabel;
-    const msg = generateParentAlertMessage(student, status, session.date, currentClass, effectiveSubject, effectiveTime);
+    const effectiveTeacher = session.teacherName || currentLecture?.teacherName;
+
+    if (status === 'absent') {
+      const msg = generateAbsentParentAlertMessage(
+        student,
+        session.date,
+        currentClass,
+        absentFormat,
+        effectiveSubject,
+        effectiveTime,
+        effectiveTeacher
+      );
+      shareToWhatsApp(msg, student.parentPhone);
+    } else {
+      const msg = generateParentAlertMessage(student, status, session.date, currentClass, effectiveSubject, effectiveTime);
+      shareToWhatsApp(msg, student.parentPhone);
+    }
+  };
+
+  const handleBroadcastAbsentToWhatsApp = () => {
+    if (absentStudentsList.length === 0) return;
+    const effectiveSubject = session.subject || currentLecture?.subject;
+    const effectiveTime = session.timeSlot || currentLecture?.timeSlotLabel;
+    const effectiveTeacher = session.teacherName || currentLecture?.teacherName;
+    const msg = generateAbsenteeBroadcastMessage(
+      absentStudentsList,
+      session.date,
+      currentClass,
+      absentFormat,
+      effectiveSubject,
+      effectiveTime,
+      effectiveTeacher
+    );
+    shareToWhatsApp(msg);
+  };
+
+  const handleSendIndividualAbsentWhatsApp = (student: Student) => {
+    const effectiveSubject = session.subject || currentLecture?.subject;
+    const effectiveTime = session.timeSlot || currentLecture?.timeSlotLabel;
+    const effectiveTeacher = session.teacherName || currentLecture?.teacherName;
+    const msg = generateAbsentParentAlertMessage(
+      student,
+      session.date,
+      currentClass,
+      absentFormat,
+      effectiveSubject,
+      effectiveTime,
+      effectiveTeacher
+    );
     shareToWhatsApp(msg, student.parentPhone);
   };
 
@@ -1081,9 +1141,9 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
             </div>
           </div>
 
-          {/* Save Permanently Button & Attendance Log side-by-side in one line */}
-          {onSaveAttendancePermanently && (
-            <div className="flex items-center flex-nowrap gap-2 pt-2 lg:pt-0 w-full sm:w-auto shrink-0">
+          {/* Save Permanently Button, Attendance Log, and WhatsApp Notice side-by-side in one line */}
+          <div className="flex items-center flex-wrap gap-2 pt-2 lg:pt-0 w-full sm:w-auto shrink-0">
+            {onSaveAttendancePermanently && (
               <button
                 id="btn-save-attendance-permanently"
                 type="button"
@@ -1094,21 +1154,32 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                 <Save className="w-3.5 h-3.5 shrink-0" />
                 <span>Save Attendance</span>
               </button>
+            )}
 
-              {onNavigateToRegister && (
-                <button
-                  type="button"
-                  onClick={onNavigateToRegister}
-                  className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-gradient-to-b from-white to-slate-100 hover:to-slate-200 text-slate-800 text-xs font-bold px-3.5 py-2 rounded-xl border border-slate-200/90 shadow-xs active:translate-y-0.5 transition-all cursor-pointer btn-tactile whitespace-nowrap min-h-[40px]"
-                  title="View taken records and defaulters list"
-                >
-                  <CalendarCheck className="w-3.5 h-3.5 text-slate-600 shrink-0" />
-                  <span>Attendance Log</span>
-                  <ArrowRight className="w-3 h-3 text-slate-400 shrink-0" />
-                </button>
-              )}
-            </div>
-          )}
+            {onNavigateToRegister && (
+              <button
+                type="button"
+                onClick={onNavigateToRegister}
+                className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-gradient-to-b from-white to-slate-100 hover:to-slate-200 text-slate-800 text-xs font-bold px-3.5 py-2 rounded-xl border border-slate-200/90 shadow-xs active:translate-y-0.5 transition-all cursor-pointer btn-tactile whitespace-nowrap min-h-[40px]"
+                title="View taken records and defaulters list"
+              >
+                <CalendarCheck className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+                <span>Attendance Log</span>
+                <ArrowRight className="w-3 h-3 text-slate-400 shrink-0" />
+              </button>
+            )}
+
+            {/* Instant WhatsApp Share Button (Zero scrolling!) */}
+            <button
+              type="button"
+              onClick={handleBroadcastAbsentToWhatsApp}
+              className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-[#25D366] hover:bg-[#1faa4f] text-white text-xs font-black px-3.5 py-2 rounded-xl transition-all shadow-xs cursor-pointer whitespace-nowrap min-h-[40px] active:scale-95"
+              title="Send full WhatsApp attendance report / absentee notice without scrolling"
+            >
+              <Share2 className="w-3.5 h-3.5 shrink-0" />
+              <span>WhatsApp Notice {stats.absent > 0 ? `(${stats.absent} Absent)` : ''}</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1290,6 +1361,149 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
           </div>
         )}
 
+        {/* =========================================================================
+           ABSENT STUDENTS WHATSAPP ALERT & NOTIFICATION CONTROL CENTER
+           ========================================================================= */}
+        {stats.absent > 0 && (
+          <div id="absent-parents-alert-card" className="p-4 sm:p-5 bg-gradient-to-br from-rose-50/70 via-white to-amber-50/30 border-t-2 border-rose-200 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-rose-100">
+              <div className="flex items-center gap-2.5">
+                <span className="w-10 h-10 rounded-2xl bg-rose-100 text-rose-700 flex items-center justify-center font-bold shrink-0 border border-rose-200">
+                  <UserX className="w-5 h-5 stroke-[2.5]" />
+                </span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm sm:text-base font-black text-slate-900">
+                      Alert Parents of Absent Students
+                    </h3>
+                    <span className="text-[10.5px] font-bold px-2 py-0.5 rounded-full bg-rose-600 text-white">
+                      {absentStudentsList.length} Absent Today
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 font-medium">
+                    Send WhatsApp notices to parents individually or share absentee list to the class group
+                  </p>
+                </div>
+              </div>
+
+              {/* Broadcast to Group Button */}
+              <button
+                type="button"
+                onClick={handleBroadcastAbsentToWhatsApp}
+                className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-[#25D366] hover:bg-[#1faa4f] active:scale-95 text-white font-black text-xs flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer shrink-0"
+                title="Send full list of absent students to class WhatsApp group or parent broadcast"
+              >
+                <Share2 className="w-4 h-4" />
+                <span>Share Absent List to WhatsApp</span>
+              </button>
+            </div>
+
+            {/* Custom Control: Choose What to Send in WhatsApp Message */}
+            <div className="bg-white p-3.5 rounded-xl border border-rose-200 shadow-2xs space-y-2">
+              <span className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
+                <span>WhatsApp Message Format Control: What to include in the message?</span>
+              </span>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAbsentFormat('both')}
+                  className={`p-2.5 rounded-xl border text-xs font-bold transition-all text-left flex items-center gap-2 cursor-pointer ${
+                    absentFormat === 'both'
+                      ? 'bg-rose-50 border-rose-500 text-rose-950 ring-2 ring-rose-400/20 shadow-xs'
+                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <span className={`w-4 h-4 rounded-full border flex items-center justify-center text-[10px] shrink-0 ${
+                    absentFormat === 'both' ? 'border-rose-600 bg-rose-600 text-white font-black' : 'border-slate-300'
+                  }`}>
+                    {absentFormat === 'both' ? '✓' : ''}
+                  </span>
+                  <div>
+                    <span className="block font-black">Both Name & Roll Number</span>
+                    <span className="text-[10px] text-slate-500 font-normal">e.g. Roll #04 - Aarav Sharma</span>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setAbsentFormat('name_only')}
+                  className={`p-2.5 rounded-xl border text-xs font-bold transition-all text-left flex items-center gap-2 cursor-pointer ${
+                    absentFormat === 'name_only'
+                      ? 'bg-rose-50 border-rose-500 text-rose-950 ring-2 ring-rose-400/20 shadow-xs'
+                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <span className={`w-4 h-4 rounded-full border flex items-center justify-center text-[10px] shrink-0 ${
+                    absentFormat === 'name_only' ? 'border-rose-600 bg-rose-600 text-white font-black' : 'border-slate-300'
+                  }`}>
+                    {absentFormat === 'name_only' ? '✓' : ''}
+                  </span>
+                  <div>
+                    <span className="block font-black">Student Name Only</span>
+                    <span className="text-[10px] text-slate-500 font-normal">e.g. Aarav Sharma</span>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setAbsentFormat('roll_only')}
+                  className={`p-2.5 rounded-xl border text-xs font-bold transition-all text-left flex items-center gap-2 cursor-pointer ${
+                    absentFormat === 'roll_only'
+                      ? 'bg-rose-50 border-rose-500 text-rose-950 ring-2 ring-rose-400/20 shadow-xs'
+                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <span className={`w-4 h-4 rounded-full border flex items-center justify-center text-[10px] shrink-0 ${
+                    absentFormat === 'roll_only' ? 'border-rose-600 bg-rose-600 text-white font-black' : 'border-slate-300'
+                  }`}>
+                    {absentFormat === 'roll_only' ? '✓' : ''}
+                  </span>
+                  <div>
+                    <span className="block font-black">Roll Number Only</span>
+                    <span className="text-[10px] text-slate-500 font-normal">e.g. Roll #04</span>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* Individual Absent Students List with 1-Tap Alert Button */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs font-bold text-slate-700 px-1">
+                <span>Alert Parents Individually (Control format: {absentFormat === 'both' ? 'Name & Roll No' : absentFormat === 'name_only' ? 'Name Only' : 'Roll No Only'}):</span>
+                <span className="text-[11px] text-slate-500 font-normal">Tap WhatsApp to message parent</span>
+              </div>
+
+              <div className="divide-y divide-slate-100 bg-white rounded-xl border border-slate-200 max-h-56 overflow-y-auto">
+                {absentStudentsList.map((st) => (
+                  <div key={st.id} className="p-2.5 sm:p-3 flex items-center justify-between gap-2 hover:bg-rose-50/40 transition-colors">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="font-mono font-bold text-xs px-2 py-0.5 rounded-md bg-rose-100 text-rose-800 shrink-0">
+                        #{st.rollNo}
+                      </span>
+                      <div className="min-w-0">
+                        <span className="font-bold text-xs text-slate-900 block truncate">{st.name}</span>
+                        <span className="text-[11px] text-slate-500 block truncate">
+                          Parent: {st.parentName || 'Parent'} &bull; {st.parentPhone || 'No phone'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleSendIndividualAbsentWhatsApp(st)}
+                      className="px-3 py-1.5 rounded-lg bg-[#25D366] hover:bg-[#1faa4f] text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-xs cursor-pointer active:scale-95 shrink-0"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      <span>Alert Parent</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Share Attendance WhatsApp Button at the End of Student List */}
         <div className="p-3.5 sm:p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="text-xs text-slate-500 text-center sm:text-left">
@@ -1331,41 +1545,43 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
           
           {/* Input & Callout Card */}
           <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-xs space-y-3.5">
-            <div className="flex items-center justify-between">
-              <div>
+            <div className="flex items-start sm:items-center justify-between gap-3 min-w-0">
+              <div className="min-w-0 flex-1">
                 <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
-                  <Hash className="w-4 h-4 text-sky-600" />
-                  <span>Enter Roll Number</span>
+                  <Hash className="w-4 h-4 text-sky-600 shrink-0" />
+                  <span className="truncate">Enter Roll Number</span>
                 </h3>
-                <p className="text-[11px] text-slate-500 font-medium">
-                  Type roll numbers of present students & press Enter. Un-entered students are marked Absent automatically.
+                <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
+                  Type roll numbers of present students &amp; press Enter. Un-entered students are marked Absent automatically.
                 </p>
               </div>
-              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">
+              <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200 shrink-0 whitespace-nowrap self-start sm:self-auto shadow-2xs">
                 {currentClass.name}
               </span>
             </div>
 
-            {/* Form Input */}
+            {/* Form Input with Responsive Non-overlapping Layout */}
             <form onSubmit={handleMarkRollNumbers} className="space-y-3">
-              <div className="relative">
-                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-mono text-sm font-bold">
-                  #
-                </span>
-                <input
-                  type="text"
-                  value={manualRollInput}
-                  onChange={(e) => setManualRollInput(e.target.value)}
-                  placeholder="Enter Roll No (e.g. 5, 12, 14 or 1-10)..."
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-28 py-3 text-sm font-bold text-slate-900 placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:outline-hidden focus:border-sky-500 focus:ring-4 focus:ring-sky-100 transition-all shadow-inner"
-                  autoFocus
-                />
+              <div className="flex flex-col sm:flex-row gap-2.5">
+                <div className="relative flex-1 min-w-0">
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-mono text-sm font-bold pointer-events-none select-none">
+                    #
+                  </span>
+                  <input
+                    type="text"
+                    value={manualRollInput}
+                    onChange={(e) => setManualRollInput(e.target.value)}
+                    placeholder="e.g. 5, 12, 14 or 1-10"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl pl-9 pr-3.5 py-2.5 sm:py-3 text-sm font-bold text-slate-900 placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:outline-hidden focus:border-sky-500 focus:ring-4 focus:ring-sky-100 transition-all shadow-inner"
+                    autoFocus
+                  />
+                </div>
                 <button
                   type="submit"
                   disabled={!manualRollInput.trim()}
-                  className="absolute right-1.5 top-1.5 bottom-1.5 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:scale-95 disabled:opacity-40 disabled:pointer-events-none text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                  className="w-full sm:w-auto px-5 py-2.5 sm:py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 disabled:opacity-40 disabled:pointer-events-none text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs shrink-0"
                 >
-                  <Check className="w-3.5 h-3.5 stroke-[3]" />
+                  <Check className="w-4 h-4 stroke-[3]" />
                   <span>Mark Present</span>
                 </button>
               </div>
@@ -1458,6 +1674,55 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                 })}
               </div>
             </div>
+
+            {/* Absent Parents Alert in Manual Roll Mode */}
+            {stats.absent > 0 && (
+              <div className="p-3.5 bg-gradient-to-br from-rose-50/70 via-white to-amber-50/30 rounded-xl border border-rose-200 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-rose-100">
+                  <div className="flex items-center gap-2">
+                    <span className="w-8 h-8 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center font-bold shrink-0">
+                      <UserX className="w-4 h-4 stroke-[2.5]" />
+                    </span>
+                    <div>
+                      <h4 className="text-xs font-black text-slate-900">
+                        Alert Absent Students' Parents ({absentStudentsList.length} Absent)
+                      </h4>
+                      <p className="text-[10px] text-slate-500 font-medium">
+                        Format: {absentFormat === 'both' ? 'Name & Roll No' : absentFormat === 'name_only' ? 'Name Only' : 'Roll No Only'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleBroadcastAbsentToWhatsApp}
+                    className="px-3 py-1.5 rounded-lg bg-[#25D366] hover:bg-[#1faa4f] text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-xs cursor-pointer active:scale-95 shrink-0 self-start sm:self-auto"
+                  >
+                    <Share2 className="w-3.5 h-3.5" />
+                    <span>Share Absent List to WhatsApp</span>
+                  </button>
+                </div>
+
+                {/* Control format */}
+                <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700 overflow-x-auto pb-0.5">
+                  <span className="text-slate-500 text-[10px] whitespace-nowrap">Include in message:</span>
+                  {(['both', 'name_only', 'roll_only'] as const).map(fmt => (
+                    <button
+                      key={fmt}
+                      type="button"
+                      onClick={() => setAbsentFormat(fmt)}
+                      className={`px-2 py-1 rounded-md text-[11px] font-bold transition-all cursor-pointer whitespace-nowrap ${
+                        absentFormat === fmt
+                          ? 'bg-rose-600 text-white shadow-2xs'
+                          : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      {fmt === 'both' ? 'Name & Roll' : fmt === 'name_only' ? 'Name Only' : 'Roll Only'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Quick Actions & Permanent Save Button */}
             <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row items-center gap-2">
