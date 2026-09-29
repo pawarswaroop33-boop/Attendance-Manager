@@ -398,11 +398,6 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
                     </span>
                   )}
                 </div>
-                <p className="text-[11px] sm:text-xs text-slate-300 leading-normal block whitespace-normal break-words">
-                  {selectedDateSessions.length > 0
-                    ? `${selectedDateSessions.length} recorded lecture${selectedDateSessions.length > 1 ? 's' : ''} • ${selectedDateSummary?.avgAttendanceRate || 0}% attendance (${selectedDateSummary?.totalPresent || 0} Present, ${selectedDateSummary?.totalAbsent || 0} Absent)`
-                    : 'No recorded attendance for this date'}
-                </p>
               </div>
             </div>
 
@@ -624,11 +619,6 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
               <h2 className="text-lg sm:text-xl font-extrabold flex items-center gap-2 text-white">
                 <span>{formatDateWithDay(selectedDate, selectedDateDayOfWeek)}</span>
               </h2>
-              <p className="text-xs text-slate-300">
-                {selectedDateSessions.length > 0
-                  ? `Showing ${selectedDateSessions.length} recorded lecture${selectedDateSessions.length > 1 ? 's' : ''} and student attendance roster for this date.`
-                  : `No attendance records exist for this date yet. You can click "Mark Attendance" below to take attendance.`}
-              </p>
             </div>
 
             {/* Quick Date Stats & Action */}

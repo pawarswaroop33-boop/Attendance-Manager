@@ -378,11 +378,6 @@ export const DefaultersView: React.FC<DefaultersViewProps> = ({
                   : 'Attendance Log & Defaulters'}
               </span>
             </h1>
-            <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
-              {currentUser?.role === 'teacher'
-                ? `Permanent record of all attendance sessions and defaulter rates for lectures conducted by ${currentUser.name}.`
-                : 'Permanent record of all taken attendance sessions sorted by date, day, subject, faculty, present, and absent students — with the academic defaulters list below.'}
-            </p>
           </div>
 
           {/* Quick Jump Buttons & HOD Faculty Filter */}

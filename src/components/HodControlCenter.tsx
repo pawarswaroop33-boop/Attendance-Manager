@@ -1437,60 +1437,6 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
         {/* SECTION 1: ENROLLED STUDENTS */}
         {activeSection === 'students' && (
           <div className="space-y-4 animate-fadeIn w-full min-w-0">
-            {/* Top Action Banner */}
-            <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200/90 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex items-center gap-3 min-w-0 flex-1">
-                <span className="p-2.5 rounded-xl bg-amber-50 text-amber-600 border border-amber-200 shrink-0 flex items-center justify-center">
-                  <GraduationCap className="w-5 h-5" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <h2 className="text-base sm:text-lg font-black text-slate-900 leading-tight">Enrolled Students Roster</h2>
-                  <p className="text-xs text-slate-500 font-medium leading-normal mt-0.5 break-normal">
-                    Manage student profiles, enrollment, contact info and photos
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 flex-wrap">
-                <button
-                  type="button"
-                  onClick={onOpenImportModal}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-xs transition-all cursor-pointer shadow-2xs active:scale-95"
-                >
-                  <Sparkles className="w-4 h-4 text-emerald-600" />
-                  <span>Scan Excel / PDF</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditingStudent(null);
-                    setNewStudentName('');
-                    setNewStudentRoll('');
-                    setNewStudentParent('');
-                    setNewStudentPhone('');
-                    setNewStudentEmail('');
-                    setShowAddStudentModal(true);
-                  }}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition-all shadow-sm cursor-pointer active:scale-95"
-                >
-                  <UserPlus className="w-4 h-4" />
-                  <span>Enroll Student</span>
-                </button>
-
-                {students.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setShowDeleteAllStudentsModal(true)}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 font-bold text-xs transition-all cursor-pointer active:scale-95"
-                  >
-                    <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-                    <span>Delete All</span>
-                  </button>
-                )}
-              </div>
-            </div>
-
             {/* Filter, Search, and Quick Edit Bar */}
             <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-1">
@@ -1528,6 +1474,46 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
                     </button>
                   )}
                 </div>
+              </div>
+
+              {/* Action Buttons & Quick Edit */}
+              <div className="flex items-center gap-2 flex-wrap shrink-0 self-start md:self-auto">
+                <button
+                  type="button"
+                  onClick={onOpenImportModal}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-xs transition-all cursor-pointer shadow-2xs active:scale-95"
+                >
+                  <Sparkles className="w-4 h-4 text-emerald-600" />
+                  <span>Scan Excel / PDF</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingStudent(null);
+                    setNewStudentName('');
+                    setNewStudentRoll('');
+                    setNewStudentParent('');
+                    setNewStudentPhone('');
+                    setNewStudentEmail('');
+                    setShowAddStudentModal(true);
+                  }}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition-all shadow-sm cursor-pointer active:scale-95"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>Enroll</span>
+                </button>
+
+                {students.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowDeleteAllStudentsModal(true)}
+                    className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 font-bold text-xs transition-all cursor-pointer active:scale-95"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                    <span>Delete All</span>
+                  </button>
+                )}
               </div>
 
               {/* Quick Select & Edit Student (Zero scrolling!) */}
@@ -1660,38 +1646,10 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
 
         {/* SECTION 2: TIMETABLE & LECTURE SCHEDULE (Sorted by Day with Zero Horizontal Scrolling) */}
         {activeSection === 'timetable' && (
-          <div className="space-y-5 animate-fadeIn w-full min-w-0">
-            {/* Top Action & Overview Banner */}
-            <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200/90 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-2xl bg-sky-50 text-sky-600 flex items-center justify-center border border-sky-200 shrink-0">
-                  <Calendar className="w-5 h-5" />
-                </div>
-                <div>
-                  <h2 className="text-base sm:text-lg font-black text-slate-900">
-                    Weekly Timetable by Day
-                  </h2>
-                  <p className="text-xs text-slate-500">
-                    Lectures organized day-by-day with auto-fitting faculty, subjects, and classroom details
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 flex-wrap">
-                <button
-                  type="button"
-                  onClick={() => setShowAddSlotModal(true)}
-                  className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs transition-all shadow-sm cursor-pointer active:scale-95"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Schedule New Lecture</span>
-                </button>
-              </div>
-            </div>
-
+          <div className="space-y-4 animate-fadeIn w-full min-w-0">
             {/* Day Selector Navigation Tabs */}
-            <div className="bg-white p-2 sm:p-2.5 rounded-2xl border border-slate-200/90 shadow-2xs">
-              <div className="flex items-center gap-1 sm:gap-1.5 overflow-x-auto no-scrollbar w-full">
+            <div className="bg-white p-2 sm:p-2.5 rounded-2xl border border-slate-200/90 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-1 sm:gap-1.5 overflow-x-auto no-scrollbar w-full sm:w-auto">
                 <button
                   type="button"
                   onClick={() => setSelectedTimetableDay('all')}
@@ -1733,6 +1691,15 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
                   );
                 })}
               </div>
+
+              <button
+                type="button"
+                onClick={() => setShowAddSlotModal(true)}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs transition-all shadow-sm cursor-pointer active:scale-95 shrink-0 self-start sm:self-auto"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Schedule Lecture</span>
+              </button>
             </div>
 
             {/* Day-Wise Schedule Sections (Fluid responsive cards with zero horizontal scroll) */}
@@ -1841,58 +1808,8 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
         {/* SECTION 3: FACULTY DIRECTORY */}
         {activeSection === 'faculty' && (
           <div className="space-y-4 animate-fadeIn w-full min-w-0">
-            <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200/90 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-2.5">
-                <span className="p-2 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-200">
-                  <Users className="w-5 h-5" />
-                </span>
-                <div>
-                  <h2 className="text-base sm:text-lg font-black text-slate-900">Faculty Roster & Login Credentials</h2>
-                  <p className="text-xs text-slate-500">
-                    HOD has full access to edit faculty details, assigned subjects, and login credentials (unique code & password)
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 flex-wrap">
-                {/* Quick Edit Faculty Dropdown (Zero Scrolling!) */}
-                <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl text-xs">
-                  <Edit3 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap hidden sm:inline">Edit Faculty:</span>
-                  <select
-                    value=""
-                    onChange={(e) => {
-                      const tId = e.target.value;
-                      if (!tId) return;
-                      const t = teachers.find(teach => teach.id === tId);
-                      if (t) {
-                        handleOpenEditTeacher(t);
-                      }
-                    }}
-                    className="bg-transparent text-xs font-bold text-slate-800 focus:outline-hidden cursor-pointer max-w-[170px] truncate"
-                  >
-                    <option value="">⚡ Quick Edit...</option>
-                    {teachers.map(t => (
-                      <option key={t.id} value={t.id}>
-                        {t.name} ({t.uniqueCode})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleOpenAddTeacher}
-                  className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all shadow-sm cursor-pointer active:scale-95 shrink-0"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Add New Faculty</span>
-                </button>
-              </div>
-            </div>
-
             {/* Faculty Search Bar & View Mode Toggle */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-slate-200/90 shadow-2xs">
+            <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-slate-200/90 shadow-2xs">
               <div className="flex items-center gap-2 flex-1">
                 <Search className="w-4 h-4 text-slate-400 shrink-0" />
                 <input
@@ -1911,6 +1828,42 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
                     <X className="w-3.5 h-3.5" />
                   </button>
                 )}
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap shrink-0">
+                {/* Quick Edit Faculty Dropdown */}
+                <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl text-xs">
+                  <Edit3 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap hidden sm:inline">Edit Faculty:</span>
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      const tId = e.target.value;
+                      if (!tId) return;
+                      const t = teachers.find(teach => teach.id === tId);
+                      if (t) {
+                        handleOpenEditTeacher(t);
+                      }
+                    }}
+                    className="bg-transparent text-xs font-bold text-slate-800 focus:outline-hidden cursor-pointer max-w-[150px] truncate"
+                  >
+                    <option value="">⚡ Quick Edit...</option>
+                    {teachers.map(t => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} ({t.uniqueCode})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleOpenAddTeacher}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all shadow-sm cursor-pointer active:scale-95 shrink-0"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Add Faculty</span>
+                </button>
               </div>
 
               {/* View Mode Switcher: Compact Table (Zero Scroll) vs Cards */}
@@ -2237,23 +2190,12 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
         {/* SECTION 4: CLASSROOMS & LABS */}
         {activeSection === 'classrooms' && (
           <div className="space-y-4 animate-fadeIn w-full min-w-0">
-            <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200/90 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-2.5">
-                <span className="p-2 rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-200">
-                  <Building className="w-5 h-5" />
-                </span>
-                <div>
-                  <h2 className="text-base sm:text-lg font-black text-slate-900">Campus Classrooms & Laboratories</h2>
-                  <p className="text-xs text-slate-500">
-                    Manage classroom capacities, lab rooms, and academic allocation
-                  </p>
-                </div>
-              </div>
-
+            <div className="flex items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-slate-200/90 shadow-2xs">
+              <span className="text-xs font-bold text-slate-700 px-2">Campus Classrooms ({classrooms.length})</span>
               <button
                 type="button"
                 onClick={() => setShowAddRoomModal(true)}
-                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all shadow-sm cursor-pointer active:scale-95"
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all shadow-sm cursor-pointer active:scale-95 shrink-0"
               >
                 <Plus className="w-4 h-4" />
                 <span>Add Classroom / Lab</span>
@@ -2303,81 +2245,34 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
         {/* SECTION 5: ATTENDANCE LOGS & DATE CLEAR */}
         {activeSection === 'attendance_log' && (
           <div className="space-y-4 animate-fadeIn w-full min-w-0">
-            <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200/90 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3 min-w-0 flex-1">
-                <span 
-                  style={{ height: '21.1px' }}
-                  className="p-2.5 rounded-xl bg-rose-50 text-rose-600 border border-rose-200 shrink-0 flex items-center justify-center"
-                >
-                  <ClipboardList className="w-5 h-5" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <h2 className="text-base sm:text-lg font-black text-slate-900 leading-tight">
-                    Attendance Log & Date Clear Audit
-                  </h2>
-                  <p 
-                    style={{ height: '40px', width: '300px' }}
-                    className="text-xs text-slate-500 font-medium leading-normal mt-0.5 break-normal"
-                  >
-                    Audit campus attendance records, clear dates & export monthly summaries
-                  </p>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setShowMonthlyExportModal(true)}
-                className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 active:scale-95 text-white font-bold text-xs shadow-md transition-all cursor-pointer shrink-0"
-              >
-                <FileSpreadsheet className="w-4 h-4 text-emerald-200 shrink-0" />
-                <span>Export Monthly Attendance (Excel)</span>
-              </button>
-            </div>
-
             {/* ZERO-SCROLL FAST DATE CLEAR & AUDIT MANAGER */}
             <div className="bg-gradient-to-br from-slate-900 via-slate-850 to-slate-900 text-white p-4 sm:p-5 rounded-3xl border border-slate-700/80 shadow-md space-y-4">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-700/60">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center shrink-0">
-                    <Trash2 className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm sm:text-base font-extrabold text-white flex items-center gap-2">
-                      <span>⚡ Fast Date Clear & Attendance Manager</span>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                        Zero Scrolling
-                      </span>
-                    </h3>
-                  </div>
+              {/* Quick Select from Recorded Dates Dropdown */}
+              {recordedDatesList.length > 0 && (
+                <div className="flex items-center gap-2 bg-slate-800/90 border border-slate-700 rounded-2xl px-3 py-1.5 text-xs">
+                  <span className="text-slate-400 font-bold whitespace-nowrap">Recorded Dates:</span>
+                  <select
+                    value={recordedDatesList.includes(quickAuditDate) ? quickAuditDate : ''}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        setQuickAuditDate(e.target.value);
+                        setCalendarSelectedDate(e.target.value);
+                      }
+                    }}
+                    className="bg-transparent text-white font-bold focus:outline-hidden cursor-pointer max-w-[210px] truncate"
+                  >
+                    <option value="" className="bg-slate-900 text-white">Select Date ({recordedDatesList.length})...</option>
+                    {recordedDatesList.map(dStr => {
+                      const count = cleanSessions.filter(s => s.date === dStr).length;
+                      return (
+                        <option key={dStr} value={dStr} className="bg-slate-900 text-white">
+                          {formatDateWithDay(dStr)} ({count} {count === 1 ? 'lecture' : 'lectures'})
+                        </option>
+                      );
+                    })}
+                  </select>
                 </div>
-
-                {/* Quick Select from Recorded Dates Dropdown */}
-                {recordedDatesList.length > 0 && (
-                  <div className="flex items-center gap-2 bg-slate-800/90 border border-slate-700 rounded-2xl px-3 py-1.5 text-xs">
-                    <span className="text-slate-400 font-bold whitespace-nowrap">Recorded Dates:</span>
-                    <select
-                      value={recordedDatesList.includes(quickAuditDate) ? quickAuditDate : ''}
-                      onChange={(e) => {
-                        if (e.target.value) {
-                          setQuickAuditDate(e.target.value);
-                          setCalendarSelectedDate(e.target.value);
-                        }
-                      }}
-                      className="bg-transparent text-white font-bold focus:outline-hidden cursor-pointer max-w-[210px] truncate"
-                    >
-                      <option value="" className="bg-slate-900 text-white">Select Date ({recordedDatesList.length})...</option>
-                      {recordedDatesList.map(dStr => {
-                        const count = cleanSessions.filter(s => s.date === dStr).length;
-                        return (
-                          <option key={dStr} value={dStr} className="bg-slate-900 text-white">
-                            {formatDateWithDay(dStr)} ({count} {count === 1 ? 'lecture' : 'lectures'})
-                          </option>
-                        );
-                      })}
-                    </select>
-                  </div>
-                )}
-              </div>
+              )}
 
               {/* Date Input & Status Bar */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-center">
@@ -2437,6 +2332,15 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
 
                 {/* Right: Direct Action Buttons (Zero Scrolling Clear) */}
                 <div className="lg:col-span-4 flex items-center justify-end gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setShowMonthlyExportModal(true)}
+                    className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 active:scale-95 text-white font-bold text-xs shadow-md transition-all cursor-pointer shrink-0"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-200 shrink-0" />
+                    <span>Export Excel</span>
+                  </button>
+
                   {quickDateSessions.length > 0 ? (
                     <button
                       type="button"
@@ -2498,23 +2402,12 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
         {/* SECTION 6: DEPARTMENT ANALYTICS */}
         {activeSection === 'analytics' && (
           <div className="space-y-4 animate-fadeIn w-full min-w-0">
-            <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200/90 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-2.5">
-                <span className="p-2 rounded-xl bg-teal-50 text-teal-600 border border-teal-200">
-                  <BarChart3 className="w-5 h-5" />
-                </span>
-                <div>
-                  <h2 className="text-base sm:text-lg font-black text-slate-900">Department Overview & Analytics</h2>
-                  <p className="text-xs text-slate-500">
-                    High-level academic attendance statistics, session counts, and student compliance
-                  </p>
-                </div>
-              </div>
-
+            <div className="flex items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-slate-200/90 shadow-2xs">
+              <span className="text-xs font-bold text-slate-700 px-2">Department Overview & Analytics</span>
               <button
                 type="button"
                 onClick={() => setShowMonthlyExportModal(true)}
-                className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 active:scale-95 text-white font-bold text-xs shadow-md transition-all cursor-pointer shrink-0"
+                className="flex items-center justify-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 active:scale-95 text-white font-bold text-xs shadow-md transition-all cursor-pointer shrink-0"
               >
                 <FileSpreadsheet className="w-4 h-4 text-emerald-200" />
                 <span>Export Monthly Attendance (Excel)</span>
@@ -2581,9 +2474,6 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
                         SHA-256
                       </span>
                     </h2>
-                    <p className="text-xs text-slate-500">
-                      Configure your HOD login username, password, and cryptographic zero-leak integrity protection
-                    </p>
                   </div>
                 </div>
 

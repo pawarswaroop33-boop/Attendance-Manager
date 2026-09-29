@@ -242,9 +242,6 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
               </span>
             )}
           </div>
-          <p className="text-xs text-slate-500 mt-1">
-            Track student attendance patterns, identify students requiring attention, and export records directly to WhatsApp.
-          </p>
         </div>
 
         <button
