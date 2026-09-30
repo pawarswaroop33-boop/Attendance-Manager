@@ -17,6 +17,7 @@ import { Student, ClassGroup, AttendanceSession, SystemSettings, AuthUser, Timet
 import { getDayOfWeek, formatDateShort, formatDateWithDay, getSessionStats, isLegacyDummySession } from '../utils/dateUtils';
 import { AttendanceCalendar } from './AttendanceCalendar';
 import { isSessionBelongsToTeacher } from '../utils/teacherFilter';
+import { exportMonthlyAttendanceToExcel } from '../utils/excelExport';
 
 interface DefaultersViewProps {
   students: Student[];
@@ -27,6 +28,7 @@ interface DefaultersViewProps {
   userRole: 'hod' | 'teacher';
   currentUser?: AuthUser;
   timetable?: TimetableSlot[];
+  teachers?: Teacher[];
   onNavigateToSession?: (classId: string, date: string, lectureSlotId?: string) => void;
   onOpenWhatsAppModal?: () => void;
   onClearDateAttendance?: (dateStr: string) => void;
@@ -45,6 +47,7 @@ export const DefaultersView: React.FC<DefaultersViewProps> = ({
   userRole,
   currentUser,
   timetable,
+  teachers = [],
   onNavigateToSession,
   onOpenWhatsAppModal,
   onClearDateAttendance,
@@ -573,15 +576,35 @@ export const DefaultersView: React.FC<DefaultersViewProps> = ({
               </div>
             </div>
 
-            {/* Export Defaulters CSV Button */}
-            <div className="flex justify-end">
+            {/* Export Buttons */}
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  exportMonthlyAttendanceToExcel(
+                    { classId: selectedClassFilter, threshold },
+                    classes,
+                    students,
+                    sessions,
+                    settings,
+                    holidays,
+                    teachers,
+                    timetable
+                  );
+                }}
+                className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 active:scale-95 text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-200" />
+                <span>Export Master Excel (.xlsx)</span>
+              </button>
+
               <button
                 type="button"
                 onClick={handleExportDefaultersCSV}
                 disabled={defaultersList.length === 0}
                 className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 active:scale-95 text-white text-xs font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <Download className="w-3.5 h-3.5" />
                 <span>Export Defaulters CSV</span>
               </button>
             </div>

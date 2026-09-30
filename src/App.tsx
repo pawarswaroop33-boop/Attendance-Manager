@@ -1953,6 +1953,7 @@ export default function App() {
               userRole={currentUser.role}
               currentUser={currentUser}
               timetable={timetable}
+              teachers={teachers}
               onNavigateToSession={currentUser.role === 'teacher' ? (classId, date, slotId) => {
                 setSelectedClassId(classId);
                 setSelectedDate(date);
@@ -1979,6 +1980,10 @@ export default function App() {
               onOpenWhatsApp={handleOpenWhatsAppModal}
               currentUser={currentUser}
               timetable={timetable}
+              settings={settings}
+              classes={classes}
+              teachers={teachers}
+              holidays={holidays}
             />
           </div>
         )}

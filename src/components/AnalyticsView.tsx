@@ -7,14 +7,16 @@ import {
   Share2, 
   MessageSquare, 
   Filter, 
-  ArrowUpDown,
-  Search,
-  Award
+  ArrowUpDown, 
+  Search, 
+  Award,
+  FileSpreadsheet
 } from 'lucide-react';
-import { AttendanceSession, ClassGroup, Student, AuthUser, TimetableSlot } from '../types';
+import { AttendanceSession, ClassGroup, Student, AuthUser, TimetableSlot, SystemSettings } from '../types';
 import { generateAnalyticsReportMessage, generateDefaulterWarningMessage, shareToWhatsApp } from '../utils/whatsapp';
 import { isSessionBelongsToTeacher } from '../utils/teacherFilter';
 import { isLegacyDummySession } from '../utils/dateUtils';
+import { exportMonthlyAttendanceToExcel } from '../utils/excelExport';
 
 interface AnalyticsViewProps {
   sessions: AttendanceSession[];
@@ -24,6 +26,10 @@ interface AnalyticsViewProps {
   onOpenWhatsApp: () => void;
   currentUser?: AuthUser;
   timetable?: TimetableSlot[];
+  settings?: SystemSettings;
+  classes?: ClassGroup[];
+  teachers?: Teacher[];
+  holidays?: Holiday[];
 }
 
 export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
@@ -33,7 +39,11 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
   students = [],
   onOpenWhatsApp,
   currentUser,
-  timetable
+  timetable,
+  settings,
+  classes = [],
+  teachers = [],
+  holidays = []
 }) => {
   const [filterThreshold, setFilterThreshold] = useState<'all' | 'defaulters' | 'stars'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -244,15 +254,45 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
           </div>
         </div>
 
-        <button
-          id="share-analytics-summary-button"
-          type="button"
-          onClick={handleShareAnalyticsSummary}
-          className="w-full md:w-auto flex items-center justify-center gap-2 bg-[#25D366] hover:bg-[#1faa4f] text-white font-bold text-xs sm:text-sm px-4 py-2.5 rounded-xl shadow-xs transition-all cursor-pointer shrink-0"
-        >
-          <Share2 className="w-4 h-4" />
-          <span>Share Analytics on WhatsApp</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              const effectiveSettings = settings || {
+                collegeName: 'D.Y.PATIL TECHNICAL CAMPUS',
+                departmentName: 'Department of Electronics And Computer Engineering',
+                hodName: 'Prof. Prashant Kathole',
+                hodUsername: 'dyp',
+                hodPasscode: 'dyp123',
+                defaulterThreshold: 75
+              };
+              exportMonthlyAttendanceToExcel(
+                { classId: currentClass.id },
+                classes.length > 0 ? classes : [currentClass],
+                rawStudents,
+                sessions,
+                effectiveSettings,
+                holidays,
+                teachers,
+                timetable
+              );
+            }}
+            className="w-full sm:w-auto flex items-center justify-center gap-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs sm:text-sm px-4 py-2.5 rounded-xl shadow-xs transition-all cursor-pointer shrink-0"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-emerald-200" />
+            <span>Export Master Excel (.xlsx)</span>
+          </button>
+
+          <button
+            id="share-analytics-summary-button"
+            type="button"
+            onClick={handleShareAnalyticsSummary}
+            className="w-full sm:w-auto flex items-center justify-center gap-2 bg-[#25D366] hover:bg-[#1faa4f] text-white font-bold text-xs sm:text-sm px-4 py-2.5 rounded-xl shadow-xs transition-all cursor-pointer shrink-0"
+          >
+            <Share2 className="w-4 h-4" />
+            <span>Share on WhatsApp</span>
+          </button>
+        </div>
       </div>
 
       {/* 4 Summary Metric Cards - Compact on Mobile */}

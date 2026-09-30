@@ -282,9 +282,11 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
         students,
         sessions,
         settings,
-        holidays
+        holidays,
+        teachers,
+        timetable
       );
-      setExportSuccessNotice('Monthly Attendance Excel (.xlsx) file downloaded successfully!');
+      setExportSuccessNotice('Department Master Excel (.xlsx) single sheet downloaded successfully!');
       setTimeout(() => {
         setExportSuccessNotice(null);
         setShowMonthlyExportModal(false);
@@ -3548,20 +3550,28 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
               <div className="p-3.5 bg-emerald-50/70 rounded-2xl border border-emerald-200 space-y-2 text-xs">
                 <span className="font-extrabold text-emerald-950 flex items-center gap-1.5">
                   <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
-                  <span>Excel Workbook (.xlsx) Includes 3 Dedicated Sheets:</span>
+                  <span>Single Unified Worksheet ("Department Master Register"):</span>
                 </span>
-                <ul className="space-y-1 text-[11px] text-emerald-900 font-medium pl-1">
-                  <li className="flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
-                    <span><strong>Sheet 1: Monthly Attendance Matrix:</strong> Complete roll-call register with Present (P), Absent (A), Late (L) for every day + Total %</span>
+                <ul className="space-y-1.5 text-[11px] text-emerald-900 font-medium pl-1">
+                  <li className="flex items-start gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 mt-1.5 shrink-0" />
+                    <span><strong>1. Faculty Directory:</strong> System teachers, designated subjects, codes & contacts</span>
                   </li>
-                  <li className="flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-rose-600" />
-                    <span><strong>Sheet 2: Defaulters List (&lt;{settings.defaulterThreshold || 75}%):</strong> Student names, parents & shortage percentages</span>
+                  <li className="flex items-start gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-600 mt-1.5 shrink-0" />
+                    <span><strong>2. Student Attendance Master:</strong> Exact 13 columns (Maths, SDAV, DSA %, ratios, total absent & academic status)</span>
                   </li>
-                  <li className="flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-sky-600" />
-                    <span><strong>Sheet 3: Conducted Sessions Audit:</strong> Timings, faculty in-charge & attendance ratios</span>
+                  <li className="flex items-start gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-sky-600 mt-1.5 shrink-0" />
+                    <span><strong>3. Weekly Lecture Schedule:</strong> System timetable, timings, subjects & labs</span>
+                  </li>
+                  <li className="flex items-start gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 mt-1.5 shrink-0" />
+                    <span><strong>4. Conducted Sessions Audit:</strong> Live recorded lectures, faculty in-charge & attendance ratios</span>
+                  </li>
+                  <li className="flex items-start gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-600 mt-1.5 shrink-0" />
+                    <span><strong>5. Defaulters List (&lt;{settings.defaulterThreshold || 75}%):</strong> Shortage deficits & parent WhatsApp contacts</span>
                   </li>
                 </ul>
               </div>
