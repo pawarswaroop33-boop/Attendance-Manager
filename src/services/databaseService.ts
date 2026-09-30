@@ -23,7 +23,7 @@ class CampusDatabaseService {
     this.firebaseAdapter = new FirebaseDatabaseAdapter();
     this.supabaseAdapter = new SupabaseDatabaseAdapter();
 
-    // Default to Supabase as requested by user, or restore preference
+    // Default to Supabase as primary cloud database
     try {
       if (typeof localStorage !== 'undefined') {
         const saved = localStorage.getItem(STORAGE_KEY_PROVIDER) as DatabaseProviderType;
@@ -170,16 +170,12 @@ class CampusDatabaseService {
       console.warn('[DatabaseService] Server state save notice:', err);
     });
 
-    // 2. Persist to active Cloud Database (Supabase PostgreSQL - does NOT touch or burn Firestore quota)
-    const cloudPromises: Promise<any>[] = [];
-    try {
-      cloudPromises.push(this.adapter.saveEntireCampusState(state));
-    } catch (err) {
-      console.warn('[DatabaseService] Cloud adapter save notice:', err);
-    }
+    // 2. Dual-write to Supabase PostgreSQL and Firebase
+    const cloudPromises: Promise<any>[] = [
+      this.supabaseAdapter.saveEntireCampusState(state).catch(err => console.warn('[DatabaseService] Supabase save notice:', err))
+    ];
 
-    // Only save to Firebase if Firebase is explicitly the active provider
-    if (this.activeProvider === 'firebase' && !this.firebaseAdapter.isQuotaExhausted) {
+    if (!this.firebaseAdapter.isQuotaExhausted) {
       try {
         cloudPromises.push(this.firebaseAdapter.saveEntireCampusState(state));
       } catch (_) {}
@@ -226,12 +222,13 @@ class CampusDatabaseService {
       console.warn('[DatabaseService] Server session push notice:', err);
     });
 
-    // Persist session to active Cloud Database (Supabase PostgreSQL)
-    const cloudPromises: Promise<any>[] = [this.adapter.saveSession(session)];
+    // Dual-write session to both Supabase PostgreSQL and Firebase Firestore
+    const cloudPromises: Promise<any>[] = [
+      this.supabaseAdapter.saveSession(session).catch(err => console.warn('[DatabaseService] Supabase saveSession notice:', err))
+    ];
     
-    // Only save to Firebase if Firebase is explicitly the active provider
-    if (this.activeProvider === 'firebase' && !this.firebaseAdapter.isQuotaExhausted) {
-      cloudPromises.push(this.firebaseAdapter.saveSession(session));
+    if (!this.firebaseAdapter.isQuotaExhausted) {
+      cloudPromises.push(this.firebaseAdapter.saveSession(session).catch(() => {}));
     }
 
     await Promise.allSettled([serverPromise, ...cloudPromises]);

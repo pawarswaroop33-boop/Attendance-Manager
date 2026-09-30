@@ -59,6 +59,7 @@ import { sha256Hex, evaluatePasswordStrength, sanitizeUsername } from '../utils/
 import { AttendanceCalendar } from './AttendanceCalendar';
 import { formatDateShort, formatDateWithDay, isLegacyDummySession, getHolidayForDate, getTodayDateStr } from '../utils/dateUtils';
 import { exportMonthlyAttendanceToExcel } from '../utils/excelExport';
+import { deduplicateStudents } from '../utils/studentUtils';
 
 export type HodSidebarSection = 
   | 'students' 
@@ -646,9 +647,9 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
     setTimeout(() => setCopiedCodeId(null), 2000);
   };
 
-  // Filtered students
+  // Filtered students (strictly deduplicated so no roll number repeats 1, 1)
   const displayedStudents = useMemo(() => {
-    return students.filter(st => {
+    const raw = students.filter(st => {
       if (selectedStudentClassId !== 'all') {
         const cls = classes.find(c => c.id === selectedStudentClassId);
         if (!cls || !cls.studentIds.includes(st.id)) return false;
@@ -657,6 +658,7 @@ export const HodControlCenter: React.FC<HodControlCenterProps> = ({
       const q = studentSearch.toLowerCase();
       return st.name.toLowerCase().includes(q) || st.rollNo.includes(q) || st.parentPhone?.includes(q);
     });
+    return deduplicateStudents(raw);
   }, [students, selectedStudentClassId, classes, studentSearch]);
 
   // Days List

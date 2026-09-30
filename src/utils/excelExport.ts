@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import { AttendanceSession, ClassGroup, Student, SystemSettings, Holiday, Teacher, TimetableSlot } from '../types';
 import { isValidRecordedSession, formatDateWithDay, getDayOfWeek } from './dateUtils';
 import { getStudentBatch } from './batchUtils';
+import { deduplicateStudents } from './studentUtils';
 
 export interface MonthlyExcelExportOptions {
   year?: number;
@@ -220,12 +221,8 @@ export function exportMonthlyAttendanceToExcel(
     ? allStudents.filter(s => targetClass.studentIds.includes(s.id))
     : (classId === 'all' ? allStudents : allStudents.filter(s => classes.some(c => c.id === classId && c.studentIds.includes(s.id))));
 
-  // Sort students strictly by numerical roll number (01 to 86)
-  const sortedStudents = [...targetStudents].sort((a, b) => {
-    const numA = parseInt(a.rollNo.replace(/\D/g, ''), 10) || 0;
-    const numB = parseInt(b.rollNo.replace(/\D/g, ''), 10) || 0;
-    return numA - numB;
-  });
+  // Deduplicate and sort students strictly by numerical roll number (01 to 86)
+  const sortedStudents = deduplicateStudents(targetStudents);
 
   const threshold = options.threshold || settings.defaulterThreshold || 75;
 

@@ -13,7 +13,7 @@ import {
   Lock,
   Filter
 } from 'lucide-react';
-import { Student, ClassGroup, AttendanceSession, SystemSettings, AuthUser, TimetableSlot, Holiday } from '../types';
+import { Student, ClassGroup, AttendanceSession, SystemSettings, AuthUser, TimetableSlot, Holiday, Teacher } from '../types';
 import { getDayOfWeek, formatDateShort, formatDateWithDay, getSessionStats, isLegacyDummySession } from '../utils/dateUtils';
 import { AttendanceCalendar } from './AttendanceCalendar';
 import { isSessionBelongsToTeacher } from '../utils/teacherFilter';

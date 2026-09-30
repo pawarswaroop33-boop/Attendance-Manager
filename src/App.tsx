@@ -48,6 +48,7 @@ import {
   getStudentBatch,
   getSlotBatch 
 } from './utils/batchUtils';
+import { deduplicateStudents } from './utils/studentUtils';
 
 const STORAGE_KEY_AUTH = 'dypatil_auth_user_v1';
 const STORAGE_KEY_SETTINGS = 'dypatil_settings_v1';
@@ -177,17 +178,14 @@ export default function App() {
       const saved = localStorage.getItem(STORAGE_KEY_STUDENTS);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length >= 86) {
-          return parsed.map(s => ({
-            ...s,
-            batch: getStudentBatch(s, parsed)
-          }));
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return deduplicateStudents(parsed);
         }
       }
     } catch (e) {
       console.error('Failed to load students', e);
     }
-    return INITIAL_STUDENTS;
+    return deduplicateStudents(INITIAL_STUDENTS);
   });
 
   // 8. Attendance Sessions (Starts empty by default so zero dummy/mock lectures exist)
@@ -235,16 +233,14 @@ export default function App() {
     return 'slot-mon-1';
   });
 
-  // Strict Role Guard: Non-HOD users can NEVER access 'hod' tab, and HOD role never takes live attendance
+  // Strict Role Guard: Non-HOD users can NEVER access 'hod' tab
   useEffect(() => {
-    if (currentUser?.role === 'hod' && currentTab === 'dashboard') {
-      setCurrentTab('hod');
-    } else if (currentUser && currentUser.role !== 'hod' && currentTab === 'hod') {
+    if (currentUser && currentUser.role !== 'hod' && currentTab === 'hod') {
       setCurrentTab('dashboard');
     }
   }, [currentUser, currentTab]);
 
-  // Automatically keep active lecture slot scoped to the logged-in teacher and selected date
+  // Automatically keep active lecture slot scoped to the selected date and teacher/class
   useEffect(() => {
     const day = getDayOfWeek(selectedDate);
     if (currentUser?.role === 'teacher') {
@@ -258,8 +254,13 @@ export default function App() {
           }
         }
       } else {
-        // No lectures scheduled for this teacher on this day
-        setActiveLectureSlotId(undefined);
+        // Fallback to first slot for selected class if available
+        const classDaySlots = timetable.filter(s => s.dayOfWeek === day && s.classId === selectedClassId);
+        if (classDaySlots.length > 0) {
+          setActiveLectureSlotId(classDaySlots[0].id);
+        } else {
+          setActiveLectureSlotId(undefined);
+        }
       }
     } else if (currentUser?.role === 'hod') {
       const daySlots = timetable.filter(s => s.dayOfWeek === day && (selectedClassId ? s.classId === selectedClassId : true));
@@ -379,7 +380,7 @@ export default function App() {
             setClasses(cloudState.classes);
             setSelectedClassId(prev => cloudState.classes.some(c => c.id === prev) ? prev : cloudState.classes[0].id);
           }
-          if (cloudState.students && cloudState.students.length > 0) setStudents(cloudState.students);
+          if (cloudState.students && cloudState.students.length > 0) setStudents(deduplicateStudents(cloudState.students));
           if (cloudState.teachers && cloudState.teachers.length > 0) setTeachers(cloudState.teachers);
           if (cloudState.classrooms && cloudState.classrooms.length > 0) setClassrooms(cloudState.classrooms);
           if (cloudState.timetable && cloudState.timetable.length > 0) setTimetable(cloudState.timetable);
@@ -451,7 +452,7 @@ export default function App() {
             isRemoteUpdateRef.current = true;
             if (incoming.settings) setSettings(incoming.settings);
             if (incoming.classes) setClasses(incoming.classes);
-            if (incoming.students) setStudents(incoming.students);
+            if (incoming.students) setStudents(deduplicateStudents(incoming.students));
             if (incoming.teachers) setTeachers(incoming.teachers);
             if (incoming.classrooms) setClassrooms(incoming.classrooms);
             if (incoming.timetable) setTimetable(incoming.timetable);
@@ -518,28 +519,47 @@ export default function App() {
         // Sync students if remote has more students (e.g. added on another device)
         if (remote.students && remote.students.length > students.length) {
           isRemoteUpdateRef.current = true;
-          setStudents(remote.students);
+          setStudents(deduplicateStudents(remote.students));
           setTimeout(() => { isRemoteUpdateRef.current = false; }, 300);
         }
 
-        // Sync sessions cleanly without resurrecting deleted ones
+        // Non-destructive smart merge: NEVER overwrite newer or locally recorded sessions
         if (remote.sessions && Array.isArray(remote.sessions)) {
           const cleanRemote = remote.sessions.filter(isValidRecordedSession);
-          // Only update if remote actually has different session data
+          
           setSessions(prevLocal => {
             const cleanPrev = prevLocal.filter(isValidRecordedSession);
-            const prevIds = new Set(cleanPrev.map(s => s.id));
-            const remoteIds = new Set(cleanRemote.map(s => s.id));
-            
-            // Check if identical
-            if (cleanPrev.length === cleanRemote.length && cleanPrev.every(s => remoteIds.has(s.id))) {
+            const sessionMap = new Map<string, AttendanceSession>();
+
+            // Populate local sessions
+            cleanPrev.forEach(s => {
+              const key = s.id || `${s.classId}_${s.date}_${s.lectureSlotId || 'general'}`;
+              sessionMap.set(key, s);
+            });
+
+            let hasUpdatesFromRemote = false;
+            cleanRemote.forEach(s => {
+              const key = s.id || `${s.classId}_${s.date}_${s.lectureSlotId || 'general'}`;
+              const local = sessionMap.get(key);
+              if (!local) {
+                sessionMap.set(key, s);
+                hasUpdatesFromRemote = true;
+              } else {
+                const localTime = local.lastUpdated ? new Date(local.lastUpdated).getTime() : 0;
+                const remoteTime = s.lastUpdated ? new Date(s.lastUpdated).getTime() : 0;
+                if (remoteTime > localTime) {
+                  sessionMap.set(key, s);
+                  hasUpdatesFromRemote = true;
+                }
+              }
+            });
+
+            if (!hasUpdatesFromRemote && cleanPrev.length === sessionMap.size) {
               return prevLocal;
             }
 
-            // Remote has different list - take authoritative cleanRemote
-            isRemoteUpdateRef.current = true;
-            setTimeout(() => { isRemoteUpdateRef.current = false; }, 400);
-            return cleanRemote;
+            const merged = Array.from(sessionMap.values());
+            return merged;
           });
         }
       } catch (_) {}
@@ -701,10 +721,17 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [settings, classes, students, teachers, classrooms, timetable, sessions, isDbReady]);
 
-  // Current active class
+  // Current active class (ensures all 86 students in A1, A2, A3 are always enrolled)
   const currentClass = useMemo(() => {
-    return classes.find(c => c.id === selectedClassId) || classes[0];
-  }, [classes, selectedClassId]);
+    const found = classes.find(c => c.id === selectedClassId) || classes[0];
+    if (found && students.length > 0 && (!found.studentIds || found.studentIds.length < students.length)) {
+      return {
+        ...found,
+        studentIds: students.map(s => s.id)
+      };
+    }
+    return found;
+  }, [classes, selectedClassId, students]);
 
   // Scheduled timetable lectures for selectedDate and current user
   const scheduledSlotsForSelectedDate = useMemo(() => {
@@ -736,7 +763,7 @@ export default function App() {
     const slot = activeSlot || (activeLectureSlotId ? timetable.find(s => s.id === activeLectureSlotId) : undefined);
     const slotBatch = slot?.batch || getSlotBatch(slot);
 
-    // Look for session with matching classId, date, and lecture slot (or teacher match)
+    // Look for session with matching classId, date, and lecture slot (or fallback to same class and date)
     const existing = sessions.find(s => {
       if (s.classId !== selectedClassId || s.date !== selectedDate) return false;
       if (activeLectureSlotId) {
@@ -747,9 +774,8 @@ export default function App() {
           }
           return true;
         }
-        return false;
       }
-      return currentUser?.role === 'teacher' ? isSessionBelongsToTeacher(s, currentUser, timetable) : true;
+      return true;
     });
 
     // Find assigned teacher
@@ -839,74 +865,35 @@ export default function App() {
 
   // Real-time Update individual record (ticking checkbox, setting absent, late, or adding note)
   const handleUpdateRecord = useCallback((studentId: string, status: AttendanceStatus, note?: string) => {
-    if (currentUser?.role === 'teacher' && !hasLectureOnSelectedDate) {
-      showToast("Cannot record attendance: You have no scheduled lectures on this date.", "error");
-      return;
-    }
     notifyUserChange();
     setSessions(prevSessions => {
-      const sessionIndex = prevSessions.findIndex(s => 
-        s.id === currentSession.id || (
-          s.classId === selectedClassId && 
-          s.date === selectedDate && 
-          (activeLectureSlotId ? (s.lectureSlotId === activeLectureSlotId || s.timeSlot === activeSlot?.timeSlotLabel) : true)
-        )
-      );
       const timestamp = new Date().toISOString();
+      const sessionIndex = prevSessions.findIndex(s => 
+        s.classId === selectedClassId && 
+        s.date === selectedDate && 
+        (activeLectureSlotId ? (s.lectureSlotId === activeLectureSlotId || s.timeSlot === activeSlot?.timeSlotLabel) : true)
+      );
+
+      let targetSession: AttendanceSession;
 
       if (sessionIndex >= 0) {
-        const session = prevSessions[sessionIndex];
-        const prevNote = session.records[studentId]?.note;
-        const resolvedNote = note !== undefined ? note.trim() : prevNote;
-
-        const updatedRecord: { studentId: string; status: AttendanceStatus; timestamp: string; note?: string } = {
-          studentId,
-          status,
-          timestamp
-        };
-        if (resolvedNote) {
-          updatedRecord.note = resolvedNote;
-        }
-
-        const updatedRecords = {
-          ...session.records,
-          [studentId]: updatedRecord
-        };
-
-        const updatedSession: AttendanceSession = {
-          ...session,
-          dayOfWeek: session.dayOfWeek || getDayOfWeek(selectedDate),
-          records: updatedRecords,
-          lastUpdated: timestamp,
-          isRegistered: true,
-          isRealSession: true
-        };
-
-        const next = [...prevSessions];
-        next[sessionIndex] = updatedSession;
-        return next;
+        targetSession = prevSessions[sessionIndex];
       } else {
-        // Create new session entry
         const sessionDay = getDayOfWeek(selectedDate);
-        const newRecords: Record<string, { studentId: string; status: AttendanceStatus; timestamp: string; note?: string }> = {};
+        const defaultRecords: Record<string, { studentId: string; status: AttendanceStatus; timestamp: string; note?: string }> = {};
         currentClass.studentIds.forEach(id => {
-          const itemRecord: { studentId: string; status: AttendanceStatus; timestamp: string; note?: string } = {
+          defaultRecords[id] = {
             studentId: id,
-            status: id === studentId ? status : (currentSession.records[id]?.status || 'unmarked'),
+            status: 'unmarked',
             timestamp
           };
-          if (id === studentId && note && note.trim()) {
-            itemRecord.note = note.trim();
-          }
-          newRecords[id] = itemRecord;
         });
-
         const effectiveTeacherName = currentUser?.role === 'teacher' ? currentUser.name : (activeSlot?.teacherName || currentClass.teacherName);
         const effectiveTeacherId = currentUser?.role === 'teacher' ? currentUser.id : activeSlot?.teacherId;
         const effectiveSubject = activeSlot?.subject || (currentUser?.role === 'teacher' && currentUser.assignedSubjects?.[0] ? currentUser.assignedSubjects[0] : currentClass.subject);
 
-        const newSession: AttendanceSession = {
-          id: currentSession.id,
+        targetSession = {
+          id: `${selectedClassId}_${selectedDate}_${activeLectureSlotId || activeSlot?.id || 'general'}`,
           classId: selectedClassId,
           date: selectedDate,
           dayOfWeek: sessionDay,
@@ -917,82 +904,78 @@ export default function App() {
           timeSlot: activeSlot?.timeSlotLabel,
           subject: effectiveSubject,
           batch: activeSlot?.batch,
-          records: newRecords,
+          records: defaultRecords,
           lastUpdated: timestamp,
           remarks: '',
           isRegistered: true,
           isRealSession: true
         };
-
-        return [...prevSessions, newSession];
       }
+
+      const prevNote = targetSession.records?.[studentId]?.note;
+      const resolvedNote = note !== undefined ? note.trim() : prevNote;
+
+      const updatedRecord: { studentId: string; status: AttendanceStatus; timestamp: string; note?: string } = {
+        studentId,
+        status,
+        timestamp,
+        ...(resolvedNote ? { note: resolvedNote } : {})
+      };
+
+      const updatedSession: AttendanceSession = {
+        ...targetSession,
+        records: {
+          ...(targetSession.records || {}),
+          [studentId]: updatedRecord
+        },
+        lastUpdated: timestamp,
+        isRegistered: true,
+        isRealSession: true
+      };
+
+      const next = sessionIndex >= 0 
+        ? prevSessions.map((s, idx) => idx === sessionIndex ? updatedSession : s)
+        : [...prevSessions, updatedSession];
+
+      try {
+        localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(next));
+      } catch (_) {}
+      dbService.saveSession(updatedSession).catch(() => {});
+      return next;
     });
-  }, [selectedClassId, selectedDate, activeLectureSlotId, currentClass, activeSlot, currentUser, notifyUserChange, currentSession, hasLectureOnSelectedDate]);
+  }, [selectedClassId, selectedDate, activeLectureSlotId, currentClass, activeSlot, currentUser, notifyUserChange]);
 
   // Atomic bulk update multiple student records at once (prevents loops & state clearing)
   const handleBulkUpdateRecords = useCallback((updates: Record<string, { status: AttendanceStatus; note?: string }>) => {
-    if (currentUser?.role === 'teacher' && !hasLectureOnSelectedDate) {
-      showToast("Cannot record attendance: You have no scheduled lectures on this date.", "error");
-      return;
-    }
     notifyUserChange();
     setSessions(prevSessions => {
-      const sessionIndex = prevSessions.findIndex(s => 
-        s.id === currentSession.id || (
-          s.classId === selectedClassId && 
-          s.date === selectedDate && 
-          (activeLectureSlotId ? (s.lectureSlotId === activeLectureSlotId || s.timeSlot === activeSlot?.timeSlotLabel) : true)
-        )
-      );
       const timestamp = new Date().toISOString();
+      const sessionIndex = prevSessions.findIndex(s => 
+        s.classId === selectedClassId && 
+        s.date === selectedDate && 
+        (activeLectureSlotId ? (s.lectureSlotId === activeLectureSlotId || s.timeSlot === activeSlot?.timeSlotLabel) : true)
+      );
+
+      let targetSession: AttendanceSession;
 
       if (sessionIndex >= 0) {
-        const session = prevSessions[sessionIndex];
-        const nextRecords = { ...session.records };
-        Object.entries(updates).forEach(([stId, data]) => {
-          const prevNote = nextRecords[stId]?.note;
-          const resolvedNote = data.note !== undefined ? data.note.trim() : prevNote;
-          nextRecords[stId] = {
-            studentId: stId,
-            status: data.status,
-            timestamp,
-            ...(resolvedNote ? { note: resolvedNote } : {})
-          };
-        });
-
-        const updatedSession: AttendanceSession = {
-          ...session,
-          dayOfWeek: session.dayOfWeek || getDayOfWeek(selectedDate),
-          records: nextRecords,
-          lastUpdated: timestamp,
-          isRegistered: true,
-          isRealSession: true
-        };
-
-        const next = [...prevSessions];
-        next[sessionIndex] = updatedSession;
-        return next;
+        targetSession = prevSessions[sessionIndex];
       } else {
         const sessionDay = getDayOfWeek(selectedDate);
-        const newRecords: Record<string, { studentId: string; status: AttendanceStatus; timestamp: string; note?: string }> = {};
+        const defaultRecords: Record<string, { studentId: string; status: AttendanceStatus; timestamp: string; note?: string }> = {};
         currentClass.studentIds.forEach(id => {
-          const update = updates[id];
-          const recStatus = update ? update.status : (currentSession.records[id]?.status || 'unmarked');
-          const recNote = update?.note ? update.note.trim() : undefined;
-          newRecords[id] = {
+          defaultRecords[id] = {
             studentId: id,
-            status: recStatus,
-            timestamp,
-            ...(recNote ? { note: recNote } : {})
+            status: 'unmarked',
+            timestamp
           };
         });
-
         const effectiveTeacherName = currentUser?.role === 'teacher' ? currentUser.name : (activeSlot?.teacherName || currentClass.teacherName);
         const effectiveTeacherId = currentUser?.role === 'teacher' ? currentUser.id : activeSlot?.teacherId;
         const effectiveSubject = activeSlot?.subject || (currentUser?.role === 'teacher' && currentUser.assignedSubjects?.[0] ? currentUser.assignedSubjects[0] : currentClass.subject);
 
-        const newSession: AttendanceSession = {
-          id: currentSession.id,
+        targetSession = {
+          id: `${selectedClassId}_${selectedDate}_${activeLectureSlotId || activeSlot?.id || 'general'}`,
           classId: selectedClassId,
           date: selectedDate,
           dayOfWeek: sessionDay,
@@ -1003,86 +986,123 @@ export default function App() {
           timeSlot: activeSlot?.timeSlotLabel,
           subject: effectiveSubject,
           batch: activeSlot?.batch,
-          records: newRecords,
+          records: defaultRecords,
           lastUpdated: timestamp,
           remarks: '',
           isRegistered: true,
           isRealSession: true
         };
-
-        return [...prevSessions, newSession];
       }
+
+      const nextRecords = { ...(targetSession.records || {}) };
+      Object.entries(updates).forEach(([stId, data]) => {
+        const prevNote = nextRecords[stId]?.note;
+        const resolvedNote = data.note !== undefined ? data.note.trim() : prevNote;
+        nextRecords[stId] = {
+          studentId: stId,
+          status: data.status,
+          timestamp,
+          ...(resolvedNote ? { note: resolvedNote } : {})
+        };
+      });
+
+      const updatedSession: AttendanceSession = {
+        ...targetSession,
+        records: nextRecords,
+        lastUpdated: timestamp,
+        isRegistered: true,
+        isRealSession: true
+      };
+
+      const next = sessionIndex >= 0 
+        ? prevSessions.map((s, idx) => idx === sessionIndex ? updatedSession : s)
+        : [...prevSessions, updatedSession];
+
+      try {
+        localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(next));
+      } catch (_) {}
+      dbService.saveSession(updatedSession).catch(() => {});
+      return next;
     });
-  }, [selectedClassId, selectedDate, activeLectureSlotId, currentClass, activeSlot, currentUser, notifyUserChange, currentSession, hasLectureOnSelectedDate]);
+  }, [selectedClassId, selectedDate, activeLectureSlotId, currentClass, activeSlot, currentUser, notifyUserChange]);
 
   // Batch update (All Present, All Absent, or Clear All)
   const handleBatchUpdate = useCallback((status: AttendanceStatus) => {
-    if (currentUser?.role === 'teacher' && !hasLectureOnSelectedDate) {
-      showToast("Cannot record attendance: You have no scheduled lectures on this date.", "error");
-      return;
-    }
     notifyUserChange();
     setSessions(prevSessions => {
-      const sessionIndex = prevSessions.findIndex(s => 
-        s.id === currentSession.id || (
-          s.classId === selectedClassId && 
-          s.date === selectedDate && 
-          (activeLectureSlotId ? s.lectureSlotId === activeLectureSlotId : true)
-        )
-      );
       const timestamp = new Date().toISOString();
+      const sessionIndex = prevSessions.findIndex(s => 
+        s.classId === selectedClassId && 
+        s.date === selectedDate && 
+        (activeLectureSlotId ? s.lectureSlotId === activeLectureSlotId : true)
+      );
 
-      const updatedRecords: Record<string, { studentId: string; status: AttendanceStatus; timestamp: string; note?: string }> = {};
-      currentClass.studentIds.forEach(stId => {
-        const existingNote = sessionIndex >= 0 ? prevSessions[sessionIndex].records[stId]?.note : currentSession.records[stId]?.note;
-        const recItem: { studentId: string; status: AttendanceStatus; timestamp: string; note?: string } = {
-          studentId: stId,
-          status,
-          timestamp
-        };
-        if (existingNote) {
-          recItem.note = existingNote;
-        }
-        updatedRecords[stId] = recItem;
-      });
+      let targetSession: AttendanceSession;
 
       if (sessionIndex >= 0) {
-        const session = prevSessions[sessionIndex];
-        const updatedSession: AttendanceSession = {
-          ...session,
-          dayOfWeek: session.dayOfWeek || getDayOfWeek(selectedDate),
-          records: updatedRecords,
-          lastUpdated: timestamp,
-          isRegistered: true,
-          isRealSession: true
-        };
-        const next = [...prevSessions];
-        next[sessionIndex] = updatedSession;
-        return next;
+        targetSession = prevSessions[sessionIndex];
       } else {
+        const sessionDay = getDayOfWeek(selectedDate);
+        const defaultRecords: Record<string, { studentId: string; status: AttendanceStatus; timestamp: string; note?: string }> = {};
+        currentClass.studentIds.forEach(id => {
+          defaultRecords[id] = {
+            studentId: id,
+            status: 'unmarked',
+            timestamp
+          };
+        });
         const effectiveTeacherName = currentUser?.role === 'teacher' ? currentUser.name : (activeSlot?.teacherName || currentClass.teacherName);
         const effectiveTeacherId = currentUser?.role === 'teacher' ? currentUser.id : activeSlot?.teacherId;
         const effectiveSubject = activeSlot?.subject || (currentUser?.role === 'teacher' && currentUser.assignedSubjects?.[0] ? currentUser.assignedSubjects[0] : currentClass.subject);
 
-        const newSession: AttendanceSession = {
-          id: currentSession.id,
+        targetSession = {
+          id: `${selectedClassId}_${selectedDate}_${activeLectureSlotId || activeSlot?.id || 'general'}`,
           classId: selectedClassId,
           date: selectedDate,
-          dayOfWeek: getDayOfWeek(selectedDate),
+          dayOfWeek: sessionDay,
           sessionName: activeSlot ? `${activeSlot.timeSlotLabel} - ${activeSlot.subject}` : `${currentClass.name} Session`,
           teacherName: effectiveTeacherName,
           teacherId: effectiveTeacherId,
-          lectureSlotId: activeLectureSlotId,
+          lectureSlotId: activeLectureSlotId || activeSlot?.id,
           timeSlot: activeSlot?.timeSlotLabel,
           subject: effectiveSubject,
-          records: updatedRecords,
+          batch: activeSlot?.batch,
+          records: defaultRecords,
           lastUpdated: timestamp,
           remarks: '',
           isRegistered: true,
           isRealSession: true
         };
-        return [...prevSessions, newSession];
       }
+
+      const updatedRecords: Record<string, { studentId: string; status: AttendanceStatus; timestamp: string; note?: string }> = {};
+      currentClass.studentIds.forEach(stId => {
+        const existingNote = targetSession.records?.[stId]?.note;
+        updatedRecords[stId] = {
+          studentId: stId,
+          status,
+          timestamp,
+          ...(existingNote ? { note: existingNote } : {})
+        };
+      });
+
+      const updatedSession: AttendanceSession = {
+        ...targetSession,
+        records: updatedRecords,
+        lastUpdated: timestamp,
+        isRegistered: true,
+        isRealSession: true
+      };
+
+      const next = sessionIndex >= 0 
+        ? prevSessions.map((s, idx) => idx === sessionIndex ? updatedSession : s)
+        : [...prevSessions, updatedSession];
+
+      try {
+        localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(next));
+      } catch (_) {}
+      dbService.saveSession(updatedSession).catch(() => {});
+      return next;
     });
 
     if (status === 'unmarked') {
@@ -1092,14 +1112,10 @@ export default function App() {
     } else if (status === 'absent') {
       showToast(`All ${currentClass.studentIds.length} students marked Absent.`, "info");
     }
-  }, [selectedClassId, selectedDate, activeLectureSlotId, currentClass, activeSlot, currentUser, notifyUserChange, currentSession, hasLectureOnSelectedDate]);
+  }, [selectedClassId, selectedDate, activeLectureSlotId, currentClass, activeSlot, currentUser, notifyUserChange, currentSession]);
 
   // Invert Selection
   const handleInvertSelection = useCallback(() => {
-    if (currentUser?.role === 'teacher' && !hasLectureOnSelectedDate) {
-      showToast("Cannot record attendance: You have no scheduled lectures on this date.", "error");
-      return;
-    }
     notifyUserChange();
     setSessions(prevSessions => {
       const sessionIndex = prevSessions.findIndex(s => 
@@ -1132,9 +1148,11 @@ export default function App() {
         };
       });
 
+      let updatedSession: AttendanceSession;
+
       if (sessionIndex >= 0) {
         const session = prevSessions[sessionIndex];
-        const updatedSession: AttendanceSession = {
+        updatedSession = {
           ...session,
           dayOfWeek: session.dayOfWeek || getDayOfWeek(selectedDate),
           records: updatedRecords,
@@ -1144,13 +1162,17 @@ export default function App() {
         };
         const next = [...prevSessions];
         next[sessionIndex] = updatedSession;
+        try {
+          localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(next));
+        } catch (_) {}
+        dbService.saveSession(updatedSession).catch(() => {});
         return next;
       } else {
         const effectiveTeacherName = currentUser?.role === 'teacher' ? currentUser.name : (activeSlot?.teacherName || currentClass.teacherName);
         const effectiveTeacherId = currentUser?.role === 'teacher' ? currentUser.id : activeSlot?.teacherId;
         const effectiveSubject = activeSlot?.subject || (currentUser?.role === 'teacher' && currentUser.assignedSubjects?.[0] ? currentUser.assignedSubjects[0] : currentClass.subject);
 
-        const newSession: AttendanceSession = {
+        updatedSession = {
           id: currentSession.id,
           classId: selectedClassId,
           date: selectedDate,
@@ -1167,10 +1189,15 @@ export default function App() {
           isRegistered: true,
           isRealSession: true
         };
-        return [...prevSessions, newSession];
+        const next = [...prevSessions, updatedSession];
+        try {
+          localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(next));
+        } catch (_) {}
+        dbService.saveSession(updatedSession).catch(() => {});
+        return next;
       }
     });
-  }, [selectedClassId, selectedDate, activeLectureSlotId, currentClass, currentSession, activeSlot, currentUser, notifyUserChange, hasLectureOnSelectedDate]);
+  }, [selectedClassId, selectedDate, activeLectureSlotId, currentClass, currentSession, activeSlot, currentUser, notifyUserChange]);
 
   // Update remarks
   const handleUpdateSessionRemarks = useCallback((remarks: string) => {
@@ -1230,12 +1257,12 @@ export default function App() {
       id: newId
     };
 
-    setStudents(prev => [...prev, newStudent]);
+    setStudents(prev => deduplicateStudents([...prev, newStudent]));
     setClasses(prev => prev.map(c => {
       if (c.id === selectedClassId) {
         return {
           ...c,
-          studentIds: [...c.studentIds, newId]
+          studentIds: Array.from(new Set([...c.studentIds, newId]))
         };
       }
       return c;
@@ -1247,7 +1274,7 @@ export default function App() {
   // Update individual student (Req 10)
   const handleUpdateStudent = (updatedStudent: Student) => {
     notifyUserChange();
-    setStudents(prev => prev.map(s => s.id === updatedStudent.id ? updatedStudent : s));
+    setStudents(prev => deduplicateStudents(prev.map(s => s.id === updatedStudent.id ? updatedStudent : s)));
   };
 
   // Remove student from current class
@@ -1272,7 +1299,7 @@ export default function App() {
       id: `std-imp-${Date.now()}-${idx}`
     }));
 
-    setStudents(prev => [...prev, ...newStudents]);
+    setStudents(prev => deduplicateStudents([...prev, ...newStudents]));
     setClasses(prev => prev.map(c => {
       if (c.id === targetClassId) {
         return {
@@ -1519,25 +1546,39 @@ export default function App() {
   };
 
   // Explicitly Save Attendance Session Permanently to Local Storage and Cloud Database
-  const handleSaveAttendancePermanently = async () => {
+  const handleSaveAttendancePermanently = async (recordsOverride?: Record<string, { studentId: string; status: AttendanceStatus; timestamp?: string; note?: string }>) => {
     const todayStr = getTodayDateStr();
     if (selectedDate > todayStr) {
       showToast("Cannot save attendance: Selected date is in the future.", "error");
-      return;
-    }
-    if (currentUser?.role === 'teacher' && !hasLectureOnSelectedDate) {
-      showToast("Cannot save attendance: No lecture is scheduled for you on this day.", "error");
       return;
     }
     notifyUserChange();
     const timestamp = new Date().toISOString();
     const sessionDay = getDayOfWeek(selectedDate);
 
+    // Merge currentSession.records with recordsOverride if provided
+    const mergedRecords: Record<string, { studentId: string; status: AttendanceStatus; timestamp: string; note?: string }> = {};
+    const baseRecords = currentSession.records || {};
+    const override = recordsOverride || {};
+
+    currentClass.studentIds.forEach(id => {
+      const rec = override[id] || baseRecords[id];
+      const status: AttendanceStatus = rec?.status || 'unmarked';
+      const note = rec?.note;
+      const recTimestamp = rec?.timestamp || timestamp;
+      mergedRecords[id] = {
+        studentId: id,
+        status,
+        timestamp: recTimestamp,
+        ...(note ? { note } : {})
+      };
+    });
+
     // Compute present and absent counts for feedback
     let presentCount = 0;
     let absentCount = 0;
     currentClass.studentIds.forEach(id => {
-      const rec = currentSession.records[id];
+      const rec = mergedRecords[id];
       if (rec?.status === 'present') presentCount++;
       else if (rec?.status === 'absent') absentCount++;
     });
@@ -1545,6 +1586,7 @@ export default function App() {
     const sessionToSave: AttendanceSession = {
       ...currentSession,
       dayOfWeek: currentSession.dayOfWeek || sessionDay,
+      records: mergedRecords,
       lastUpdated: timestamp,
       isRegistered: true,
       isRealSession: true

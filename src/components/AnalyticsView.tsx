@@ -12,11 +12,12 @@ import {
   Award,
   FileSpreadsheet
 } from 'lucide-react';
-import { AttendanceSession, ClassGroup, Student, AuthUser, TimetableSlot, SystemSettings } from '../types';
+import { AttendanceSession, ClassGroup, Student, AuthUser, TimetableSlot, SystemSettings, Teacher, Holiday } from '../types';
 import { generateAnalyticsReportMessage, generateDefaulterWarningMessage, shareToWhatsApp } from '../utils/whatsapp';
 import { isSessionBelongsToTeacher } from '../utils/teacherFilter';
 import { isLegacyDummySession } from '../utils/dateUtils';
 import { exportMonthlyAttendanceToExcel } from '../utils/excelExport';
+import { INITIAL_SETTINGS } from '../data/mockData';
 
 interface AnalyticsViewProps {
   sessions: AttendanceSession[];
@@ -258,14 +259,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
           <button
             type="button"
             onClick={() => {
-              const effectiveSettings = settings || {
-                collegeName: 'D.Y.PATIL TECHNICAL CAMPUS',
-                departmentName: 'Department of Electronics And Computer Engineering',
-                hodName: 'Prof. Prashant Kathole',
-                hodUsername: 'dyp',
-                hodPasscode: 'dyp123',
-                defaulterThreshold: 75
-              };
+              const effectiveSettings: SystemSettings = settings || INITIAL_SETTINGS;
               exportMonthlyAttendanceToExcel(
                 { classId: currentClass.id },
                 classes.length > 0 ? classes : [currentClass],

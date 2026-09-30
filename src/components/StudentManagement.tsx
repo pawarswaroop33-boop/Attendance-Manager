@@ -12,6 +12,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { ClassGroup, Student, AuthUser } from '../types';
+import { deduplicateStudents } from '../utils/studentUtils';
 
 interface StudentManagementProps {
   currentClass: ClassGroup;
@@ -57,7 +58,8 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
   const [email, setEmail] = useState('');
 
   const classStudents = useMemo<Student[]>(() => {
-    return students.filter((s: Student) => currentClass.studentIds.includes(s.id));
+    const raw = students.filter((s: Student) => currentClass.studentIds.includes(s.id));
+    return deduplicateStudents(raw.length > 0 ? raw : students);
   }, [students, currentClass.studentIds]);
 
   const filteredStudents = useMemo<Student[]>(() => {

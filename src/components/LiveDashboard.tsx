@@ -52,6 +52,7 @@ import {
   getCombined1230To210Stats,
   StudentBatch 
 } from '../utils/batchUtils';
+import { deduplicateStudents } from '../utils/studentUtils';
 
 interface LiveDashboardProps {
   session: AttendanceSession;
@@ -64,7 +65,7 @@ interface LiveDashboardProps {
   onInvertSelection?: () => void;
   onUpdateSessionRemarks: (remarks: string) => void;
   onOpenWhatsApp: () => void;
-  onSaveAttendancePermanently?: () => void;
+  onSaveAttendancePermanently?: (recordsOverride?: Record<string, { studentId: string; status: AttendanceStatus; timestamp?: string; note?: string }>) => void;
   onNavigateToRegister?: () => void;
   currentUser?: AuthUser;
   timetable?: TimetableSlot[];
@@ -155,6 +156,18 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
   // Filter for displaying batch in UI ('All' | 'A1' | 'A2' | 'A3')
   const [activeBatchFilter, setActiveBatchFilter] = useState<'All' | 'A1' | 'A2' | 'A3'>('All');
 
+  // Optimistic local records state for instant zero-latency UI ticking
+  const [localRecords, setLocalRecords] = useState<Record<string, { studentId: string; status: AttendanceStatus; timestamp?: string; note?: string }>>({});
+
+  // Reset local optimistic overrides when active session ID changes
+  useEffect(() => {
+    setLocalRecords({});
+  }, [session?.id]);
+
+  const effectiveRecords = useMemo(() => {
+    return { ...(session?.records || {}), ...localRecords };
+  }, [session?.records, localRecords]);
+
   // Align activeBatchFilter with slotBatch if it's a specific batch slot
   useEffect(() => {
     if (slotBatch && slotBatch !== 'All') {
@@ -168,10 +181,22 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
     return getCombined1230To210Stats(selectedDate, allSessionList, allStudents, timetable);
   }, [selectedDate, allSessions, session, allStudents, timetable]);
 
-  // Class students
+  // Class students (guarantees all 86 students in A1 (1-29), A2 (30-57), and A3 (58-86) are strictly unique without roll repeats)
   const classStudents = useMemo(() => {
-    return allStudents.filter(s => currentClass.studentIds.includes(s.id));
-  }, [allStudents, currentClass]);
+    const raw = (!allStudents || allStudents.length === 0) ? [] : allStudents;
+    return deduplicateStudents(raw);
+  }, [allStudents]);
+
+  // Helper to switch active batch filter and activate matching batch lecture slot
+  const handleSelectBatch = (batch: 'All' | 'A1' | 'A2' | 'A3') => {
+    setActiveBatchFilter(batch);
+    if (batch !== 'All' && onSelectLectureSlot && dayLectures && dayLectures.length > 0) {
+      const matchingSlot = dayLectures.find(s => getSlotBatch(s) === batch);
+      if (matchingSlot) {
+        onSelectLectureSlot(matchingSlot.id);
+      }
+    }
+  };
 
   // Students belonging to current active batch filter
   const batchScopedStudents = useMemo(() => {
@@ -181,19 +206,19 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
 
   // Target students for attendance operations (marking absent/present)
   const targetStudentsForMarking = useMemo(() => {
-    if (slotBatch !== 'All') {
-      return classStudents.filter(s => getStudentBatch(s, classStudents) === slotBatch);
-    }
     if (activeBatchFilter !== 'All') {
       return classStudents.filter(s => getStudentBatch(s, classStudents) === activeBatchFilter);
+    }
+    if (slotBatch && slotBatch !== 'All') {
+      return classStudents.filter(s => getStudentBatch(s, classStudents) === slotBatch);
     }
     return classStudents;
   }, [classStudents, slotBatch, activeBatchFilter]);
 
   // List of students currently marked absent
   const absentStudentsList = useMemo(() => {
-    return batchScopedStudents.filter(st => session?.records?.[st.id]?.status === 'absent');
-  }, [batchScopedStudents, session]);
+    return batchScopedStudents.filter(st => effectiveRecords[st.id]?.status === 'absent');
+  }, [batchScopedStudents, effectiveRecords]);
 
   // Real-time calculation of counts for the active view
   const stats = useMemo(() => {
@@ -204,7 +229,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
     let unmarked = 0;
 
     batchScopedStudents.forEach(st => {
-      const rec = session?.records?.[st.id];
+      const rec = effectiveRecords[st.id];
       const status = rec?.status || 'unmarked';
       if (status === 'present') present++;
       else if (status === 'absent') absent++;
@@ -219,12 +244,12 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
     const lateRate = total > 0 ? Math.round((late / total) * 100) : 0;
 
     return { total, present, absent, late, excused, unmarked, presentRate, absentRate, lateRate };
-  }, [batchScopedStudents, session?.records]);
+  }, [batchScopedStudents, effectiveRecords]);
 
   // Filter students based on search, status, and batch
   const filteredStudents = useMemo(() => {
     return batchScopedStudents.filter(st => {
-      const rec = session?.records?.[st.id];
+      const rec = effectiveRecords[st.id];
       const status = rec?.status || 'unmarked';
 
       if (statusFilter !== 'all' && status !== statusFilter) {
@@ -241,11 +266,11 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
 
       return true;
     });
-  }, [batchScopedStudents, session?.records, statusFilter, searchQuery]);
+  }, [batchScopedStudents, effectiveRecords, statusFilter, searchQuery]);
 
   // Tapping student row toggles attendance (unmarked -> present -> absent -> present)
   const handleTogglePresent = (studentId: string) => {
-    const currentRec = session?.records?.[studentId];
+    const currentRec = effectiveRecords[studentId];
     const currentStatus = currentRec?.status || 'unmarked';
     let nextStatus: AttendanceStatus = 'present';
     if (currentStatus === 'present') {
@@ -255,6 +280,17 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
     } else {
       nextStatus = 'present';
     }
+
+    setLocalRecords(prev => ({
+      ...prev,
+      [studentId]: {
+        studentId,
+        status: nextStatus,
+        timestamp: new Date().toISOString(),
+        ...(currentRec?.note ? { note: currentRec.note } : {})
+      }
+    }));
+
     onUpdateRecord(studentId, nextStatus, currentRec?.note);
 
     if (nextStatus === 'present' && stats.present + 1 === stats.total && stats.total > 0) {
@@ -268,10 +304,21 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
 
   const handleSetStatus = (studentId: string, status: AttendanceStatus, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    const currentRec = session?.records?.[studentId];
+    const currentRec = effectiveRecords[studentId];
     const currentStatus = currentRec?.status || 'unmarked';
     // If clicking the active status, toggle back to unmarked (blank)
     const nextStatus: AttendanceStatus = currentStatus === status ? 'unmarked' : status;
+
+    setLocalRecords(prev => ({
+      ...prev,
+      [studentId]: {
+        studentId,
+        status: nextStatus,
+        timestamp: new Date().toISOString(),
+        ...(currentRec?.note ? { note: currentRec.note } : {})
+      }
+    }));
+
     onUpdateRecord(studentId, nextStatus, currentRec?.note);
   };
 
@@ -283,8 +330,17 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
 
   const handleSaveNote = () => {
     if (activeNoteStudentId) {
-      const currentRec = session?.records?.[activeNoteStudentId];
+      const currentRec = effectiveRecords[activeNoteStudentId];
       const status = currentRec?.status || 'unmarked';
+      setLocalRecords(prev => ({
+        ...prev,
+        [activeNoteStudentId]: {
+          studentId: activeNoteStudentId,
+          status,
+          timestamp: new Date().toISOString(),
+          ...(noteText.trim() ? { note: noteText.trim() } : {})
+        }
+      }));
       onUpdateRecord(activeNoteStudentId, status, noteText.trim() ? noteText.trim() : undefined);
       setActiveNoteStudentId(null);
       setNoteText('');
@@ -348,6 +404,11 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
   };
 
   const handleMarkAllPresentWithFeedback = () => {
+    const bulk: Record<string, { studentId: string; status: AttendanceStatus }> = {};
+    targetStudentsForMarking.forEach(st => {
+      bulk[st.id] = { studentId: st.id, status: 'present' };
+    });
+    setLocalRecords(prev => ({ ...prev, ...bulk }));
     onBatchUpdate('present');
     confetti({
       particleCount: 60,
@@ -358,6 +419,11 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
 
   const handleClearAll = () => {
     setStatusFilter('all');
+    const bulk: Record<string, { studentId: string; status: AttendanceStatus }> = {};
+    classStudents.forEach(st => {
+      bulk[st.id] = { studentId: st.id, status: 'unmarked' };
+    });
+    setLocalRecords(bulk);
     onBatchUpdate('unmarked');
   };
 
@@ -429,13 +495,12 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
       }
     });
 
-    // Mark un-entered students in the target batch roster as absent
-    // (Students in other batches are NEVER touched or marked absent!)
-    targetStudentsForMarking.forEach(st => {
-      if (!enteredStudentIds.has(st.id) && session?.records?.[st.id]?.status !== 'present') {
-        bulkUpdates[st.id] = { status: 'absent' };
-      }
+    // Instant optimistic update
+    const bulkOptimistic: Record<string, { studentId: string; status: AttendanceStatus }> = {};
+    Object.entries(bulkUpdates).forEach(([id, data]) => {
+      bulkOptimistic[id] = { studentId: id, status: data.status };
     });
+    setLocalRecords(prev => ({ ...prev, ...bulkOptimistic }));
 
     if (onBulkUpdateRecords && Object.keys(bulkUpdates).length > 0) {
       onBulkUpdateRecords(bulkUpdates);
@@ -452,13 +517,13 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
 
       if (lastStudent && markedCount === 1) {
         setRollFeedback({
-          message: `Roll #${lastStudent.rollNo} (${lastStudent.name}) marked Present & saved! (Un-entered students${batchSuffix} marked Absent)`,
+          message: `Roll #${lastStudent.rollNo} (${lastStudent.name}) marked Present & saved!`,
           type: 'success',
           student: lastStudent
         });
       } else {
         setRollFeedback({
-          message: `Marked ${markedCount} student(s) as Present${batchSuffix}! (Un-entered students marked Absent)`,
+          message: `Marked ${markedCount} student(s) as Present${batchSuffix}!`,
           type: 'success',
           student: lastStudent
         });
@@ -480,22 +545,27 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
     }
   };
 
-  // Switch to Manual Roll mode and automatically mark un-entered students in target batch as Absent
+  // Switch to Manual Roll mode
   const handleSwitchToManualRoll = () => {
     setAttendanceMode('manual-roll');
-    targetStudentsForMarking.forEach(st => {
-      const rec = session?.records?.[st.id];
-      if (!rec || rec.status === 'unmarked') {
-        onUpdateRecord(st.id, 'absent');
-      }
-    });
   };
 
   // Toggle roll number from 1-tap chip grid
   const handleToggleRollChip = (student: Student) => {
-    const currentRec = session?.records?.[student.id];
-    const currentStatus = currentRec?.status || 'absent';
+    const currentRec = effectiveRecords[student.id];
+    const currentStatus = currentRec?.status || 'unmarked';
     const nextStatus: AttendanceStatus = currentStatus === 'present' ? 'absent' : 'present';
+
+    setLocalRecords(prev => ({
+      ...prev,
+      [student.id]: {
+        studentId: student.id,
+        status: nextStatus,
+        timestamp: new Date().toISOString(),
+        ...(currentRec?.note ? { note: currentRec.note } : {})
+      }
+    }));
+
     onUpdateRecord(student.id, nextStatus, currentRec?.note);
 
     if (nextStatus === 'present') {
@@ -516,13 +586,16 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
   // Mark all remaining blank students in target batch as Absent
   const handleMarkRemainingAbsent = () => {
     let count = 0;
+    const bulk: Record<string, { studentId: string; status: AttendanceStatus }> = {};
     targetStudentsForMarking.forEach(st => {
-      const rec = session?.records?.[st.id];
+      const rec = effectiveRecords[st.id];
       if (!rec || rec.status === 'unmarked') {
+        bulk[st.id] = { studentId: st.id, status: 'absent' };
         onUpdateRecord(st.id, 'absent');
         count++;
       }
     });
+    setLocalRecords(prev => ({ ...prev, ...bulk }));
     setRollFeedback({
       message: `Marked remaining ${count} unmarked students as Absent & saved!`,
       type: 'success'
@@ -587,172 +660,19 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
     );
   }
 
-  // =========================================================================
-  // CASE 1: NO LECTURE ON THIS DATE
-  // =========================================================================
-  if (!hasLectureOnDate) {
-    return (
-      <div className="space-y-6">
-        <div className="bg-white rounded-3xl border-2 border-amber-200/90 p-8 sm:p-12 text-center space-y-6 shadow-sm max-w-2xl mx-auto my-6">
-          <div className="w-18 h-18 rounded-3xl bg-amber-50 border border-amber-200 text-amber-700 flex items-center justify-center mx-auto shadow-inner">
-            <CalendarOff className="w-9 h-9" />
-          </div>
-
-          <div className="space-y-2">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 text-amber-900 border border-amber-200 text-xs font-black uppercase tracking-wider">
-              <AlertCircle className="w-3.5 h-3.5 text-amber-700" />
-              <span>No Lecture Today</span>
-            </div>
-
-            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
-              There is no lecture today
-            </h2>
-
-            <p className="text-sm font-semibold text-slate-700">
-              {formatDateWithDay(selectedDate, dayOfWeek)}
-            </p>
-
-            <p className="text-xs sm:text-sm text-slate-600 max-w-lg mx-auto leading-relaxed pt-1">
-              {currentUser?.role === 'teacher'
-                ? `According to the academic timetable, you (${currentUser.name}) do not have any scheduled lectures on ${dayOfWeek}. Faculty can only take attendance on days when their lectures are scheduled.`
-                : `No academic lectures are scheduled for ${currentClass.name} on ${dayOfWeek}. Attendance cannot be marked on non-lecture days.`}
-            </p>
-          </div>
-
-          {/* Quick Jump Action Buttons */}
-          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
-            {onDeclareHoliday && (
-              <button
-                type="button"
-                onClick={() => {
-                  setHolidayTitleInput('');
-                  setIsDeclareHolidayModalOpen(true);
-                }}
-                className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-black transition-all shadow-xs flex items-center gap-2 cursor-pointer active:scale-95 border border-amber-400"
-              >
-                <span>🏖️</span>
-                <span>Declare {formatDateShort(selectedDate)} as Holiday</span>
-              </button>
-            )}
-
-            {onNavigateToTimetable && (
-              <button
-                type="button"
-                onClick={onNavigateToTimetable}
-                className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-all shadow-xs flex items-center gap-2 cursor-pointer active:scale-95"
-              >
-                <Clock className="w-4 h-4 text-sky-400" />
-                <span>View Full Weekly Timetable</span>
-              </button>
-            )}
-
-            {nextLectureDate && onSelectDate && (
-              <button
-                type="button"
-                onClick={() => onSelectDate(nextLectureDate.dateStr)}
-                className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-xs flex items-center gap-2 cursor-pointer active:scale-95"
-              >
-                <Sparkles className="w-4 h-4 text-emerald-200" />
-                <span>Go to Next Lecture: {formatDateShort(nextLectureDate.dateStr)} ({nextLectureDate.dayOfWeek})</span>
-              </button>
-            )}
-
-            {onSelectDate && (
-              <button
-                type="button"
-                onClick={() => onSelectDate(getTodayDateStr())}
-                className="px-3.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all cursor-pointer"
-              >
-                Jump to Today
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* MODAL: DECLARE HOLIDAY */}
-        {isDeclareHolidayModalOpen && (
-          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
-            <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-5 animate-gentle-pop">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-10 h-10 rounded-2xl bg-amber-50 text-amber-700 border border-amber-200 flex items-center justify-center text-xl shadow-inner">
-                    🏖️
-                  </div>
-                  <div>
-                    <h3 className="text-base font-black text-slate-900">Declare Official Holiday</h3>
-                    <p className="text-xs text-slate-500 font-semibold">{formatDateWithDay(selectedDate)}</p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIsDeclareHolidayModalOpen(false)}
-                  className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition-colors cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              <div className="space-y-3">
-                <label className="block text-xs font-extrabold text-slate-700">
-                  Holiday Title / Occasion
-                </label>
-
-                <div className="flex flex-wrap gap-1.5 pt-0.5">
-                  {[
-                    'Institutional Holiday',
-                    'Public / Festival Holiday',
-                    'College Annual Day / Event',
-                    'Departmental Event',
-                    'Semester Vacation'
-                  ].map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => setHolidayTitleInput(preset)}
-                      className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-[11px] font-bold transition-all cursor-pointer"
-                    >
-                      {preset}
-                    </button>
-                  ))}
-                </div>
-
-                <input
-                  type="text"
-                  value={holidayTitleInput}
-                  onChange={(e) => setHolidayTitleInput(e.target.value)}
-                  placeholder="Enter holiday title e.g. Ganesh Chaturthi"
-                  className="w-full bg-slate-50 border border-slate-300 rounded-2xl px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-amber-500"
-                  autoFocus
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsDeclareHolidayModalOpen(false)}
-                  className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-colors cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (onDeclareHoliday) {
-                      onDeclareHoliday(selectedDate, holidayTitleInput || 'Declared Official Holiday');
-                    }
-                    setIsDeclareHolidayModalOpen(false);
-                  }}
-                  className="px-5 py-2.5 rounded-xl bg-gradient-to-b from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-white text-xs font-black transition-all shadow-md active:scale-95 cursor-pointer"
-                >
-                  Declare Holiday
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
+  // Fallback display lecture for dates without pre-scheduled timetable slots
+  const displayLecture = currentLecture || {
+    id: `extra-${selectedDate}`,
+    dayOfWeek: getDayOfWeek(selectedDate),
+    startTime: '08:00 AM',
+    endTime: '09:00 AM',
+    timeSlotLabel: 'Extra / Conducted Class',
+    subject: session?.subject || currentClass?.subject || 'Applied Electronics & Computer Engineering',
+    classId: currentClass.id,
+    className: currentClass.name,
+    teacherName: currentUser?.name || currentClass.teacherName || 'Faculty Member',
+    roomName: 'Main Lecture Hall'
+  };
 
   // =========================================================================
   // CASE 2: LECTURE SCHEDULED ON THIS DATE - TAKE ATTENDANCE
@@ -764,7 +684,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
       {/* ========================================================================= */}
       {/* REFINED LECTURE HERO CARD: Light Gradient with Flowing Wave Design */}
       {/* ========================================================================= */}
-      {currentLecture && (
+      {displayLecture && (
         <div className="bg-gradient-to-r from-sky-50 via-white to-blue-50/80 rounded-2xl px-4 py-3.5 sm:py-4 text-slate-800 shadow-xs border border-sky-200/80 relative overflow-hidden">
           {/* Elegant Multi-layered Wave Accent Design */}
           <div className="absolute inset-0 pointer-events-none overflow-hidden">
@@ -805,7 +725,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
               {/* Timing Badge */}
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/90 backdrop-blur-xs text-sky-800 border border-sky-200 text-xs font-mono font-bold shadow-2xs">
                 <Clock className="w-3.5 h-3.5 text-sky-600 shrink-0" />
-                <span>{currentLecture.timeSlotLabel}</span>
+                <span>{displayLecture.timeSlotLabel}</span>
               </span>
 
               {/* Date & Day Badge */}
@@ -824,28 +744,28 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
             {/* Subject Title (Centered & Prominent) */}
             <h2 className="text-base sm:text-xl font-black text-slate-900 tracking-tight flex items-center justify-center gap-2">
               <BookOpen className="w-5 h-5 text-sky-600 shrink-0" />
-              <span>{currentLecture.subject}</span>
+              <span>{displayLecture.subject}</span>
             </h2>
 
             {/* Details Meta Row: Faculty, Room, Class, Biometric (Centered) */}
             <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-slate-600 font-medium pt-0.5">
               <span className="flex items-center gap-1">
                 <User className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                <span>Faculty: <strong className="text-slate-900 font-bold">{currentLecture.teacherName}</strong></span>
+                <span>Faculty: <strong className="text-slate-900 font-bold">{displayLecture.teacherName}</strong></span>
               </span>
 
               <span className="text-slate-300 hidden sm:inline">&bull;</span>
 
               <span className="flex items-center gap-1">
                 <MapPin className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                <span>Room: <strong className="text-slate-900 font-bold">{currentLecture.roomName}</strong></span>
+                <span>Room: <strong className="text-slate-900 font-bold">{displayLecture.roomName}</strong></span>
               </span>
 
               <span className="text-slate-300 hidden sm:inline">&bull;</span>
 
               <span className="flex items-center gap-1">
                 <GraduationCap className="w-3.5 h-3.5 text-sky-600 shrink-0" />
-                <span>Class: <strong className="text-slate-900 font-bold">{currentLecture.className || currentClass.name}</strong></span>
+                <span>Class: <strong className="text-slate-900 font-bold">{displayLecture.className || currentClass.name}</strong></span>
               </span>
             </div>
 
@@ -930,7 +850,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
             {/* Batch A1 */}
             <button
               type="button"
-              onClick={() => setActiveBatchFilter(activeBatchFilter === 'A1' ? 'All' : 'A1')}
+              onClick={() => handleSelectBatch(activeBatchFilter === 'A1' ? 'All' : 'A1')}
               className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
                 activeBatchFilter === 'A1'
                   ? 'bg-indigo-600/50 border-indigo-400 ring-2 ring-indigo-400/40 shadow-xs'
@@ -954,7 +874,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
             {/* Batch A2 */}
             <button
               type="button"
-              onClick={() => setActiveBatchFilter(activeBatchFilter === 'A2' ? 'All' : 'A2')}
+              onClick={() => handleSelectBatch(activeBatchFilter === 'A2' ? 'All' : 'A2')}
               className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
                 activeBatchFilter === 'A2'
                   ? 'bg-indigo-600/50 border-indigo-400 ring-2 ring-indigo-400/40 shadow-xs'
@@ -978,7 +898,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
             {/* Batch A3 */}
             <button
               type="button"
-              onClick={() => setActiveBatchFilter(activeBatchFilter === 'A3' ? 'All' : 'A3')}
+              onClick={() => handleSelectBatch(activeBatchFilter === 'A3' ? 'All' : 'A3')}
               className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
                 activeBatchFilter === 'A3'
                   ? 'bg-indigo-600/50 border-indigo-400 ring-2 ring-indigo-400/40 shadow-xs'
@@ -1197,7 +1117,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
             <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl flex-wrap">
               <button
                 type="button"
-                onClick={() => setActiveBatchFilter('All')}
+                onClick={() => handleSelectBatch('All')}
                 className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                   activeBatchFilter === 'All'
                     ? 'bg-slate-900 text-white shadow-xs'
@@ -1208,7 +1128,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => setActiveBatchFilter('A1')}
+                onClick={() => handleSelectBatch('A1')}
                 className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                   activeBatchFilter === 'A1'
                     ? 'bg-indigo-600 text-white shadow-xs'
@@ -1219,7 +1139,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => setActiveBatchFilter('A2')}
+                onClick={() => handleSelectBatch('A2')}
                 className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                   activeBatchFilter === 'A2'
                     ? 'bg-indigo-600 text-white shadow-xs'
@@ -1230,7 +1150,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => setActiveBatchFilter('A3')}
+                onClick={() => handleSelectBatch('A3')}
                 className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                   activeBatchFilter === 'A3'
                     ? 'bg-indigo-600 text-white shadow-xs'
@@ -1387,7 +1307,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
               <button
                 id="btn-save-attendance-permanently"
                 type="button"
-                onClick={onSaveAttendancePermanently}
+                onClick={() => onSaveAttendancePermanently(effectiveRecords)}
                 className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-gradient-to-b from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 active:scale-95 active:translate-y-0.5 text-white text-xs font-black px-3.5 py-2 rounded-xl transition-all shadow-[0_2px_8px_rgba(16,185,129,0.35),inset_0_1px_0_rgba(255,255,255,0.3)] border border-emerald-400/40 cursor-pointer whitespace-nowrap min-h-[40px]"
                 title="Save attendance permanently with Date, Day, Present and Absent list"
               >
@@ -1450,7 +1370,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
         ) : (
           <div className="divide-y divide-slate-100">
             {filteredStudents.map((student) => {
-              const rec = session.records[student.id];
+              const rec = effectiveRecords[student.id];
               const status: AttendanceStatus = rec?.status || 'unmarked';
               const isPresent = status === 'present';
               const isAbsent = status === 'absent';
@@ -1519,16 +1439,16 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                   <div className="w-full sm:w-auto flex items-center justify-between sm:justify-end gap-1.5 pt-1.5 sm:pt-0 border-t border-slate-100 sm:border-0" onClick={(e) => e.stopPropagation()}>
                     
                     {/* Status Switcher */}
-                    <div className="flex-1 sm:flex-initial flex items-center rounded-xl p-0.5 bg-slate-100 border border-slate-200 text-xs">
+                    <div className="flex-1 sm:flex-initial flex items-center rounded-xl p-0.5 bg-slate-100 border border-slate-200 text-xs shadow-2xs">
                       
                       {/* Button: Present */}
                       <button
                         type="button"
                         onClick={(e) => handleSetStatus(student.id, 'present', e)}
-                        className={`flex-1 sm:flex-initial flex items-center justify-center gap-1 px-2.5 sm:px-3 py-2 rounded-lg font-bold transition-all cursor-pointer min-h-[38px] ${
+                        className={`flex-1 sm:flex-initial flex items-center justify-center gap-1 px-2.5 sm:px-3.5 py-2 rounded-lg font-bold transition-all cursor-pointer min-h-[38px] active:scale-95 ${
                           isPresent 
-                            ? 'bg-emerald-600 text-white shadow-xs' 
-                            : 'text-slate-600 hover:text-emerald-700 hover:bg-white/60'
+                            ? 'bg-emerald-600 text-white shadow-xs ring-1 ring-emerald-500 font-extrabold' 
+                            : 'text-slate-600 hover:text-emerald-700 hover:bg-white/80'
                         }`}
                         title={isPresent ? 'Click to deselect (make blank)' : 'Mark Present'}
                       >
@@ -1540,10 +1460,10 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                       <button
                         type="button"
                         onClick={(e) => handleSetStatus(student.id, 'absent', e)}
-                        className={`flex-1 sm:flex-initial flex items-center justify-center gap-1 px-2.5 sm:px-3 py-2 rounded-lg font-bold transition-all cursor-pointer min-h-[38px] ${
+                        className={`flex-1 sm:flex-initial flex items-center justify-center gap-1 px-2.5 sm:px-3.5 py-2 rounded-lg font-bold transition-all cursor-pointer min-h-[38px] active:scale-95 ${
                           isAbsent 
-                            ? 'bg-rose-600 text-white shadow-xs' 
-                            : 'text-slate-600 hover:text-rose-700 hover:bg-white/60'
+                            ? 'bg-rose-600 text-white shadow-xs ring-1 ring-rose-500 font-extrabold' 
+                            : 'text-slate-600 hover:text-rose-700 hover:bg-white/80'
                         }`}
                         title={isAbsent ? 'Click to deselect (make blank)' : 'Mark Absent'}
                       >
@@ -1555,10 +1475,10 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                       <button
                         type="button"
                         onClick={(e) => handleSetStatus(student.id, 'late', e)}
-                        className={`flex-1 sm:flex-initial flex items-center justify-center gap-1 px-2 sm:px-2.5 py-2 rounded-lg font-bold transition-all cursor-pointer min-h-[38px] ${
+                        className={`flex-1 sm:flex-initial flex items-center justify-center gap-1 px-2 sm:px-2.5 py-2 rounded-lg font-bold transition-all cursor-pointer min-h-[38px] active:scale-95 ${
                           isLate 
-                            ? 'bg-slate-800 text-white shadow-xs' 
-                            : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                            ? 'bg-slate-800 text-white shadow-xs ring-1 ring-slate-700 font-extrabold' 
+                            : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
                         }`}
                         title={isLate ? 'Click to deselect (make blank)' : 'Mark Late'}
                       >
@@ -1571,10 +1491,10 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                     <button
                       type="button"
                       onClick={(e) => handleOpenNoteModal(student.id, rec?.note, e)}
-                      className={`p-2 rounded-xl border transition-colors cursor-pointer shrink-0 min-h-[38px] min-w-[38px] flex items-center justify-center ${
+                      className={`p-2 rounded-xl border transition-all cursor-pointer shrink-0 min-h-[38px] min-w-[38px] flex items-center justify-center active:scale-95 ${
                         rec?.note 
                           ? 'bg-slate-100 border-slate-300 text-slate-800' 
-                          : 'bg-white border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+                          : 'bg-white border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-50 shadow-2xs'
                       }`}
                       title={rec?.note ? `Note: ${rec.note}` : 'Add note/reason'}
                     >
@@ -1586,7 +1506,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                       <button
                         type="button"
                         onClick={(e) => handleSendParentWhatsApp(student, 'absent', e)}
-                        className="flex items-center justify-center gap-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold px-2.5 py-2 rounded-xl transition-colors cursor-pointer shrink-0 min-h-[38px]"
+                        className="flex items-center justify-center gap-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold px-2.5 py-2 rounded-xl transition-all cursor-pointer shrink-0 min-h-[38px] active:scale-95 shadow-2xs"
                         title={`Alert parent on WhatsApp: ${student.parentPhone}`}
                       >
                         <MessageSquare className="w-3.5 h-3.5 text-[#25D366] shrink-0" />
@@ -1757,7 +1677,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
               <button
                 id="btn-save-attendance-permanently-footer"
                 type="button"
-                onClick={onSaveAttendancePermanently}
+                onClick={() => onSaveAttendancePermanently(effectiveRecords)}
                 className="w-full sm:w-auto flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs sm:text-sm px-5 py-2.5 rounded-xl shadow-xs transition-all cursor-pointer shrink-0"
               >
                 <Save className="w-4 h-4" />
@@ -1807,7 +1727,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                 <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl flex-wrap">
                   <button
                     type="button"
-                    onClick={() => setActiveBatchFilter('All')}
+                    onClick={() => handleSelectBatch('All')}
                     className={`px-2 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                       activeBatchFilter === 'All'
                         ? 'bg-slate-900 text-white shadow-xs'
@@ -1818,7 +1738,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setActiveBatchFilter('A1')}
+                    onClick={() => handleSelectBatch('A1')}
                     className={`px-2 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                       activeBatchFilter === 'A1'
                         ? 'bg-indigo-600 text-white shadow-xs'
@@ -1829,7 +1749,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setActiveBatchFilter('A2')}
+                    onClick={() => handleSelectBatch('A2')}
                     className={`px-2 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                       activeBatchFilter === 'A2'
                         ? 'bg-indigo-600 text-white shadow-xs'
@@ -1840,7 +1760,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setActiveBatchFilter('A3')}
+                    onClick={() => handleSelectBatch('A3')}
                     className={`px-2 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                       activeBatchFilter === 'A3'
                         ? 'bg-indigo-600 text-white shadow-xs'
@@ -1948,8 +1868,8 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
 
               <div className="grid grid-cols-6 sm:grid-cols-10 gap-1.5 max-h-48 overflow-y-auto p-1.5 bg-slate-50/80 rounded-xl border border-slate-200">
                 {sortedClassStudents.map(student => {
-                  const rec = session.records[student.id];
-                  const status = rec?.status || 'absent';
+                  const rec = effectiveRecords[student.id];
+                  const status = rec?.status || 'unmarked';
                   const isPresent = status === 'present';
                   const isAbsent = status === 'absent';
 
@@ -1961,10 +1881,10 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                       title={`Roll #${student.rollNo}: ${student.name} (${status.toUpperCase()})`}
                       className={`py-1.5 px-1 rounded-lg text-xs font-bold transition-all text-center cursor-pointer select-none active:scale-90 ${
                         isPresent
-                          ? 'bg-emerald-600 text-white shadow-xs ring-1 ring-emerald-500'
+                          ? 'bg-emerald-600 text-white shadow-xs ring-2 ring-emerald-400 font-black'
                           : isAbsent
-                          ? 'bg-rose-100 text-rose-800 border border-rose-300'
-                          : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100 hover:border-slate-300'
+                          ? 'bg-rose-500 text-white shadow-xs ring-1 ring-rose-400 font-bold'
+                          : 'bg-white text-slate-800 border border-slate-300 hover:bg-slate-100 hover:border-slate-400 font-medium'
                       }`}
                     >
                       {student.rollNo}
@@ -2038,7 +1958,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
               {onSaveAttendancePermanently && (
                 <button
                   type="button"
-                  onClick={onSaveAttendancePermanently}
+                  onClick={() => onSaveAttendancePermanently(effectiveRecords)}
                   className="flex-1 w-full flex items-center justify-center gap-2 bg-gradient-to-b from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 active:scale-95 active:translate-y-0.5 text-white font-black text-xs sm:text-sm py-2.5 px-4 rounded-xl shadow-[0_3px_12px_rgba(16,185,129,0.38),inset_0_1px_0_rgba(255,255,255,0.3)] border border-emerald-400/40 transition-all cursor-pointer"
                 >
                   <Save className="w-4 h-4" />
