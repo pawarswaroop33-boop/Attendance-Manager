@@ -41,6 +41,13 @@ import {
   getLecturesForDateAndUser,
   hasLectureOnDateForUser
 } from './utils/teacherFilter';
+import { 
+  isTimeSlot1230To210, 
+  isBatchPracticalSlot, 
+  getCombined1230To210Stats, 
+  getStudentBatch,
+  getSlotBatch 
+} from './utils/batchUtils';
 
 const STORAGE_KEY_AUTH = 'dypatil_auth_user_v1';
 const STORAGE_KEY_SETTINGS = 'dypatil_settings_v1';
@@ -152,7 +159,10 @@ export default function App() {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+          return parsed.map(cls => ({
+            ...cls,
+            studentIds: cls.studentIds && cls.studentIds.length >= 86 ? cls.studentIds : INITIAL_STUDENTS.map(s => s.id)
+          }));
         }
       }
     } catch (e) {
@@ -161,14 +171,17 @@ export default function App() {
     return INITIAL_CLASSES;
   });
 
-  // 7. Students Roster
+  // 7. Students Roster (Roll 1-29: A1, Roll 30-57: A2, Roll 58-86: A3)
   const [students, setStudents] = useState<Student[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_STUDENTS);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+        if (Array.isArray(parsed) && parsed.length >= 86) {
+          return parsed.map(s => ({
+            ...s,
+            batch: getStudentBatch(s, parsed)
+          }));
         }
       }
     } catch (e) {
@@ -719,15 +732,25 @@ export default function App() {
 
   // Current session for selected class, date, and lecture slot
   const currentSession = useMemo(() => {
-    // Look for session with matching classId, date, and lecture slot (or teacher match)
-    const existing = sessions.find(s => 
-      s.classId === selectedClassId && 
-      s.date === selectedDate && 
-      (activeLectureSlotId ? s.lectureSlotId === activeLectureSlotId : (currentUser?.role === 'teacher' ? isSessionBelongsToTeacher(s, currentUser, timetable) : true))
-    );
-
-    // Resolve active slot
+    // Resolve active slot first
     const slot = activeSlot || (activeLectureSlotId ? timetable.find(s => s.id === activeLectureSlotId) : undefined);
+    const slotBatch = slot?.batch || getSlotBatch(slot);
+
+    // Look for session with matching classId, date, and lecture slot (or teacher match)
+    const existing = sessions.find(s => {
+      if (s.classId !== selectedClassId || s.date !== selectedDate) return false;
+      if (activeLectureSlotId) {
+        if (s.lectureSlotId === activeLectureSlotId) return true;
+        if (slot && (s.timeSlot === slot.timeSlotLabel || s.sessionName.includes(slot.timeSlotLabel))) {
+          if (slotBatch && slotBatch !== 'All' && s.batch) {
+            return s.batch === slotBatch;
+          }
+          return true;
+        }
+        return false;
+      }
+      return currentUser?.role === 'teacher' ? isSessionBelongsToTeacher(s, currentUser, timetable) : true;
+    });
 
     // Find assigned teacher
     const matchedTeacher = teachers.find(t => 
@@ -774,9 +797,10 @@ export default function App() {
         sessionName: effectiveSessionName,
         teacherName: effectiveTeacherName,
         teacherId: effectiveTeacherId,
-        lectureSlotId: activeLectureSlotId || existing.lectureSlotId,
+        lectureSlotId: activeLectureSlotId || existing.lectureSlotId || slot?.id,
         timeSlot: effectiveTimeSlot,
         subject: effectiveSubject,
+        batch: slot?.batch || existing.batch || slotBatch,
         records
       };
     }
@@ -792,16 +816,17 @@ export default function App() {
     });
 
     return {
-      id: `${selectedClassId}_${selectedDate}_${activeLectureSlotId || 'general'}`,
+      id: `${selectedClassId}_${selectedDate}_${activeLectureSlotId || slot?.id || 'general'}`,
       classId: selectedClassId,
       date: selectedDate,
       dayOfWeek: getDayOfWeek(selectedDate),
       sessionName: effectiveSessionName,
       teacherName: effectiveTeacherName,
       teacherId: effectiveTeacherId,
-      lectureSlotId: activeLectureSlotId,
+      lectureSlotId: activeLectureSlotId || slot?.id,
       timeSlot: effectiveTimeSlot,
       subject: effectiveSubject,
+      batch: slot?.batch || slotBatch,
       records: defaultRecords,
       lastUpdated: new Date().toISOString(),
       remarks: ''
@@ -824,7 +849,7 @@ export default function App() {
         s.id === currentSession.id || (
           s.classId === selectedClassId && 
           s.date === selectedDate && 
-          (activeLectureSlotId ? s.lectureSlotId === activeLectureSlotId : true)
+          (activeLectureSlotId ? (s.lectureSlotId === activeLectureSlotId || s.timeSlot === activeSlot?.timeSlotLabel) : true)
         )
       );
       const timestamp = new Date().toISOString();
@@ -888,9 +913,96 @@ export default function App() {
           sessionName: activeSlot ? `${activeSlot.timeSlotLabel} - ${activeSlot.subject}` : `${currentClass.name} Session`,
           teacherName: effectiveTeacherName,
           teacherId: effectiveTeacherId,
-          lectureSlotId: activeLectureSlotId,
+          lectureSlotId: activeLectureSlotId || activeSlot?.id,
           timeSlot: activeSlot?.timeSlotLabel,
           subject: effectiveSubject,
+          batch: activeSlot?.batch,
+          records: newRecords,
+          lastUpdated: timestamp,
+          remarks: '',
+          isRegistered: true,
+          isRealSession: true
+        };
+
+        return [...prevSessions, newSession];
+      }
+    });
+  }, [selectedClassId, selectedDate, activeLectureSlotId, currentClass, activeSlot, currentUser, notifyUserChange, currentSession, hasLectureOnSelectedDate]);
+
+  // Atomic bulk update multiple student records at once (prevents loops & state clearing)
+  const handleBulkUpdateRecords = useCallback((updates: Record<string, { status: AttendanceStatus; note?: string }>) => {
+    if (currentUser?.role === 'teacher' && !hasLectureOnSelectedDate) {
+      showToast("Cannot record attendance: You have no scheduled lectures on this date.", "error");
+      return;
+    }
+    notifyUserChange();
+    setSessions(prevSessions => {
+      const sessionIndex = prevSessions.findIndex(s => 
+        s.id === currentSession.id || (
+          s.classId === selectedClassId && 
+          s.date === selectedDate && 
+          (activeLectureSlotId ? (s.lectureSlotId === activeLectureSlotId || s.timeSlot === activeSlot?.timeSlotLabel) : true)
+        )
+      );
+      const timestamp = new Date().toISOString();
+
+      if (sessionIndex >= 0) {
+        const session = prevSessions[sessionIndex];
+        const nextRecords = { ...session.records };
+        Object.entries(updates).forEach(([stId, data]) => {
+          const prevNote = nextRecords[stId]?.note;
+          const resolvedNote = data.note !== undefined ? data.note.trim() : prevNote;
+          nextRecords[stId] = {
+            studentId: stId,
+            status: data.status,
+            timestamp,
+            ...(resolvedNote ? { note: resolvedNote } : {})
+          };
+        });
+
+        const updatedSession: AttendanceSession = {
+          ...session,
+          dayOfWeek: session.dayOfWeek || getDayOfWeek(selectedDate),
+          records: nextRecords,
+          lastUpdated: timestamp,
+          isRegistered: true,
+          isRealSession: true
+        };
+
+        const next = [...prevSessions];
+        next[sessionIndex] = updatedSession;
+        return next;
+      } else {
+        const sessionDay = getDayOfWeek(selectedDate);
+        const newRecords: Record<string, { studentId: string; status: AttendanceStatus; timestamp: string; note?: string }> = {};
+        currentClass.studentIds.forEach(id => {
+          const update = updates[id];
+          const recStatus = update ? update.status : (currentSession.records[id]?.status || 'unmarked');
+          const recNote = update?.note ? update.note.trim() : undefined;
+          newRecords[id] = {
+            studentId: id,
+            status: recStatus,
+            timestamp,
+            ...(recNote ? { note: recNote } : {})
+          };
+        });
+
+        const effectiveTeacherName = currentUser?.role === 'teacher' ? currentUser.name : (activeSlot?.teacherName || currentClass.teacherName);
+        const effectiveTeacherId = currentUser?.role === 'teacher' ? currentUser.id : activeSlot?.teacherId;
+        const effectiveSubject = activeSlot?.subject || (currentUser?.role === 'teacher' && currentUser.assignedSubjects?.[0] ? currentUser.assignedSubjects[0] : currentClass.subject);
+
+        const newSession: AttendanceSession = {
+          id: currentSession.id,
+          classId: selectedClassId,
+          date: selectedDate,
+          dayOfWeek: sessionDay,
+          sessionName: activeSlot ? `${activeSlot.timeSlotLabel} - ${activeSlot.subject}` : `${currentClass.name} Session`,
+          teacherName: effectiveTeacherName,
+          teacherId: effectiveTeacherId,
+          lectureSlotId: activeLectureSlotId || activeSlot?.id,
+          timeSlot: activeSlot?.timeSlotLabel,
+          subject: effectiveSubject,
+          batch: activeSlot?.batch,
           records: newRecords,
           lastUpdated: timestamp,
           remarks: '',
@@ -1377,6 +1489,16 @@ export default function App() {
 
   // Total present for header badge
   const totalPresentCount = useMemo(() => {
+    // If the active lecture or session is a 12:30 to 2:10 batch slot,
+    // the total present count must include all students from the 3 batches (A1, A2, A3)
+    const isBatch1230Slot = isTimeSlot1230To210(activeSlot?.timeSlotLabel || currentSession.timeSlot) || isBatchPracticalSlot(activeSlot);
+    if (isBatch1230Slot) {
+      const combined = getCombined1230To210Stats(selectedDate, sessions, students, timetable);
+      if (combined.hasBatchSessions && combined.totalPresent > 0) {
+        return combined.totalPresent;
+      }
+    }
+
     let count = 0;
     currentClass.studentIds.forEach(id => {
       if (currentSession.records[id]?.status === 'present') {
@@ -1384,7 +1506,7 @@ export default function App() {
       }
     });
     return count;
-  }, [currentClass.studentIds, currentSession.records]);
+  }, [currentClass.studentIds, currentSession.records, currentSession.timeSlot, activeSlot, selectedDate, sessions, students]);
 
   // Toast notification state
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
@@ -1766,9 +1888,11 @@ export default function App() {
           <div key="view-dashboard" className="animate-blur-clear space-y-6">
             <LiveDashboard
               session={currentSession}
+              allSessions={sessions}
               currentClass={currentClass}
               allStudents={students}
               onUpdateRecord={handleUpdateRecord}
+              onBulkUpdateRecords={handleBulkUpdateRecords}
               onBatchUpdate={handleBatchUpdate}
               onInvertSelection={handleInvertSelection}
               onUpdateSessionRemarks={handleUpdateSessionRemarks}

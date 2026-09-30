@@ -43,12 +43,23 @@ import {
 } from '../utils/whatsapp';
 import { formatDateWithDay, formatDateShort, getDayOfWeek, getTodayDateStr, getHolidayForDate, isValidRecordedSession } from '../utils/dateUtils';
 import { getNextLectureDateForUser } from '../utils/teacherFilter';
+import { 
+  isTimeSlot1230To210, 
+  isBatchPracticalSlot, 
+  getSlotBatch, 
+  getStudentBatch, 
+  filterStudentsForBatch, 
+  getCombined1230To210Stats,
+  StudentBatch 
+} from '../utils/batchUtils';
 
 interface LiveDashboardProps {
   session: AttendanceSession;
+  allSessions?: AttendanceSession[];
   currentClass: ClassGroup;
   allStudents: Student[];
   onUpdateRecord: (studentId: string, status: AttendanceStatus, note?: string) => void;
+  onBulkUpdateRecords?: (updates: Record<string, { status: AttendanceStatus; note?: string }>) => void;
   onBatchUpdate: (status: AttendanceStatus) => void;
   onInvertSelection?: () => void;
   onUpdateSessionRemarks: (remarks: string) => void;
@@ -72,9 +83,11 @@ interface LiveDashboardProps {
 
 export const LiveDashboard: React.FC<LiveDashboardProps> = ({
   session,
+  allSessions = [],
   currentClass,
   allStudents,
   onUpdateRecord,
+  onBulkUpdateRecords,
   onBatchUpdate,
   onInvertSelection,
   onUpdateSessionRemarks,
@@ -128,17 +141,61 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
     return undefined;
   }, [activeSlot, activeLectureSlotId, timetable, dayLectures]);
 
+  // Determine if this is a 12:30 PM to 02:10 PM slot or batch practical slot
+  const is1230To210Slot = useMemo(() => {
+    const timeLabel = currentLecture?.timeSlotLabel || session?.timeSlot || '';
+    return isTimeSlot1230To210(timeLabel) || isBatchPracticalSlot(currentLecture || session);
+  }, [currentLecture, session]);
+
+  // Active slot batch ('A1' | 'A2' | 'A3' | 'All')
+  const slotBatch = useMemo(() => {
+    return getSlotBatch(currentLecture || session);
+  }, [currentLecture, session]);
+
+  // Filter for displaying batch in UI ('All' | 'A1' | 'A2' | 'A3')
+  const [activeBatchFilter, setActiveBatchFilter] = useState<'All' | 'A1' | 'A2' | 'A3'>('All');
+
+  // Align activeBatchFilter with slotBatch if it's a specific batch slot
+  useEffect(() => {
+    if (slotBatch && slotBatch !== 'All') {
+      setActiveBatchFilter(slotBatch);
+    }
+  }, [slotBatch, activeLectureSlotId]);
+
+  // Combined 12:30 - 2:10 attendance stats across all 3 batches (A1, A2, A3)
+  const combined1230Stats = useMemo(() => {
+    const allSessionList = (allSessions && allSessions.length > 0) ? allSessions : [session];
+    return getCombined1230To210Stats(selectedDate, allSessionList, allStudents, timetable);
+  }, [selectedDate, allSessions, session, allStudents, timetable]);
+
   // Class students
   const classStudents = useMemo(() => {
     return allStudents.filter(s => currentClass.studentIds.includes(s.id));
   }, [allStudents, currentClass]);
 
+  // Students belonging to current active batch filter
+  const batchScopedStudents = useMemo(() => {
+    if (activeBatchFilter === 'All') return classStudents;
+    return classStudents.filter(s => getStudentBatch(s, classStudents) === activeBatchFilter);
+  }, [classStudents, activeBatchFilter]);
+
+  // Target students for attendance operations (marking absent/present)
+  const targetStudentsForMarking = useMemo(() => {
+    if (slotBatch !== 'All') {
+      return classStudents.filter(s => getStudentBatch(s, classStudents) === slotBatch);
+    }
+    if (activeBatchFilter !== 'All') {
+      return classStudents.filter(s => getStudentBatch(s, classStudents) === activeBatchFilter);
+    }
+    return classStudents;
+  }, [classStudents, slotBatch, activeBatchFilter]);
+
   // List of students currently marked absent
   const absentStudentsList = useMemo(() => {
-    return classStudents.filter(st => session?.records?.[st.id]?.status === 'absent');
-  }, [classStudents, session]);
+    return batchScopedStudents.filter(st => session?.records?.[st.id]?.status === 'absent');
+  }, [batchScopedStudents, session]);
 
-  // Real-time calculation of counts
+  // Real-time calculation of counts for the active view
   const stats = useMemo(() => {
     let present = 0;
     let absent = 0;
@@ -146,7 +203,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
     let excused = 0;
     let unmarked = 0;
 
-    classStudents.forEach(st => {
+    batchScopedStudents.forEach(st => {
       const rec = session?.records?.[st.id];
       const status = rec?.status || 'unmarked';
       if (status === 'present') present++;
@@ -156,17 +213,17 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
       else unmarked++;
     });
 
-    const total = classStudents.length;
+    const total = batchScopedStudents.length;
     const presentRate = total > 0 ? Math.round((present / total) * 100) : 0;
     const absentRate = total > 0 ? Math.round((absent / total) * 100) : 0;
     const lateRate = total > 0 ? Math.round((late / total) * 100) : 0;
 
     return { total, present, absent, late, excused, unmarked, presentRate, absentRate, lateRate };
-  }, [classStudents, session?.records]);
+  }, [batchScopedStudents, session?.records]);
 
-  // Filter students based on search and status
+  // Filter students based on search, status, and batch
   const filteredStudents = useMemo(() => {
-    return classStudents.filter(st => {
+    return batchScopedStudents.filter(st => {
       const rec = session?.records?.[st.id];
       const status = rec?.status || 'unmarked';
 
@@ -184,7 +241,7 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
 
       return true;
     });
-  }, [classStudents, session?.records, statusFilter, searchQuery]);
+  }, [batchScopedStudents, session?.records, statusFilter, searchQuery]);
 
   // Tapping student row toggles attendance (unmarked -> present -> absent -> present)
   const handleTogglePresent = (studentId: string) => {
@@ -304,17 +361,17 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
     onBatchUpdate('unmarked');
   };
 
-  // Sorted students in numerical roll-number order
+  // Sorted students in numerical roll-number order for the active batch scope
   const sortedClassStudents = useMemo(() => {
-    return [...classStudents].sort((a, b) => {
+    return [...batchScopedStudents].sort((a, b) => {
       const numA = parseInt(a.rollNo.replace(/\D/g, ''), 10);
       const numB = parseInt(b.rollNo.replace(/\D/g, ''), 10);
       if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
       return a.rollNo.localeCompare(b.rollNo, undefined, { numeric: true });
     });
-  }, [classStudents]);
+  }, [batchScopedStudents]);
 
-  // Helper to match student by roll number
+  // Helper to match student by roll number within class
   const findStudentByRoll = (query: string): Student | undefined => {
     const clean = query.trim().replace(/^#/, '');
     if (!clean) return undefined;
@@ -358,10 +415,12 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
     });
 
     const enteredStudentIds = new Set<string>();
+    const bulkUpdates: Record<string, { status: AttendanceStatus; note?: string }> = {};
+
     expandedTokens.forEach(tok => {
       const student = findStudentByRoll(tok);
       if (student) {
-        onUpdateRecord(student.id, 'present');
+        bulkUpdates[student.id] = { status: 'present' };
         markedCount++;
         lastStudent = student;
         enteredStudentIds.add(student.id);
@@ -370,25 +429,36 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
       }
     });
 
-    // Automatically mark all un-entered students as absent
-    classStudents.forEach(st => {
+    // Mark un-entered students in the target batch roster as absent
+    // (Students in other batches are NEVER touched or marked absent!)
+    targetStudentsForMarking.forEach(st => {
       if (!enteredStudentIds.has(st.id) && session?.records?.[st.id]?.status !== 'present') {
-        if (session?.records?.[st.id]?.status !== 'absent') {
-          onUpdateRecord(st.id, 'absent');
-        }
+        bulkUpdates[st.id] = { status: 'absent' };
       }
     });
 
+    if (onBulkUpdateRecords && Object.keys(bulkUpdates).length > 0) {
+      onBulkUpdateRecords(bulkUpdates);
+    } else {
+      Object.entries(bulkUpdates).forEach(([stId, data]) => {
+        onUpdateRecord(stId, data.status, data.note);
+      });
+    }
+
     if (markedCount > 0) {
+      const batchSuffix = (slotBatch !== 'All' || activeBatchFilter !== 'All') 
+        ? ` in Batch ${slotBatch !== 'All' ? slotBatch : activeBatchFilter}` 
+        : '';
+
       if (lastStudent && markedCount === 1) {
         setRollFeedback({
-          message: `Roll #${lastStudent.rollNo} (${lastStudent.name}) marked Present & saved! (Un-entered students marked Absent)`,
+          message: `Roll #${lastStudent.rollNo} (${lastStudent.name}) marked Present & saved! (Un-entered students${batchSuffix} marked Absent)`,
           type: 'success',
           student: lastStudent
         });
       } else {
         setRollFeedback({
-          message: `Marked ${markedCount} student(s) as Present & saved! (Un-entered students marked Absent)`,
+          message: `Marked ${markedCount} student(s) as Present${batchSuffix}! (Un-entered students marked Absent)`,
           type: 'success',
           student: lastStudent
         });
@@ -404,16 +474,16 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
       }
     } else if (errors.length > 0) {
       setRollFeedback({
-        message: `Roll number(s) not found in ${currentClass.name}: ${errors.join(', ')}`,
+        message: `Roll number(s) not found: ${errors.join(', ')}`,
         type: 'error'
       });
     }
   };
 
-  // Switch to Manual Roll mode and automatically mark un-entered students as Absent
+  // Switch to Manual Roll mode and automatically mark un-entered students in target batch as Absent
   const handleSwitchToManualRoll = () => {
     setAttendanceMode('manual-roll');
-    classStudents.forEach(st => {
+    targetStudentsForMarking.forEach(st => {
       const rec = session?.records?.[st.id];
       if (!rec || rec.status === 'unmarked') {
         onUpdateRecord(st.id, 'absent');
@@ -427,16 +497,6 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
     const currentStatus = currentRec?.status || 'absent';
     const nextStatus: AttendanceStatus = currentStatus === 'present' ? 'absent' : 'present';
     onUpdateRecord(student.id, nextStatus, currentRec?.note);
-
-    // Ensure all other un-entered students are marked absent automatically
-    classStudents.forEach(st => {
-      if (st.id !== student.id) {
-        const rec = session?.records?.[st.id];
-        if (!rec || rec.status === 'unmarked') {
-          onUpdateRecord(st.id, 'absent');
-        }
-      }
-    });
 
     if (nextStatus === 'present') {
       setRollFeedback({
@@ -453,10 +513,10 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
     }
   };
 
-  // Mark all remaining blank students as Absent
+  // Mark all remaining blank students in target batch as Absent
   const handleMarkRemainingAbsent = () => {
     let count = 0;
-    classStudents.forEach(st => {
+    targetStudentsForMarking.forEach(st => {
       const rec = session?.records?.[st.id];
       if (!rec || rec.status === 'unmarked') {
         onUpdateRecord(st.id, 'absent');
@@ -822,6 +882,126 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
         </div>
       )}
 
+      {/* ========================================================================= */}
+      {/* 12:30 PM - 02:10 PM COMBINED PRACTICAL & LAB ATTENDANCE BANNER */}
+      {/* Accurately combines Batches A1 + A2 + A3 when teachers take attendance */}
+      {/* ========================================================================= */}
+      {(is1230To210Slot || combined1230Stats.hasBatchSessions) && (
+        <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-4 sm:p-5 shadow-md border border-indigo-500/30 space-y-3.5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-indigo-800/60">
+            <div className="flex items-center gap-3">
+              <span className="w-10 h-10 rounded-2xl bg-indigo-500/20 text-indigo-300 border border-indigo-400/30 flex items-center justify-center font-bold text-lg shrink-0">
+                ⚡
+              </span>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-sm sm:text-base font-black text-white tracking-tight">
+                    12:30 PM - 02:10 PM Combined Lab Attendance
+                  </h3>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 font-mono">
+                    Batches A1 + A2 + A3 Combined
+                  </span>
+                </div>
+                <p className="text-xs text-indigo-200/80 font-medium">
+                  Total student attendance aggregated across all 3 concurrent lab sessions
+                </p>
+              </div>
+            </div>
+
+            {/* Combined Total Present Count & Rate */}
+            <div className="flex items-center gap-3 bg-white/10 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10 shrink-0 self-start sm:self-auto">
+              <div className="text-right pr-3 border-r border-white/20">
+                <span className="text-[10px] font-bold uppercase text-indigo-200 block">Total Present</span>
+                <span className="text-lg font-black text-emerald-400 font-mono leading-none">
+                  {combined1230Stats.totalPresent} / {combined1230Stats.totalStudents}
+                </span>
+              </div>
+              <div className="text-center">
+                <span className="text-[10px] font-bold uppercase text-indigo-200 block">Combined Rate</span>
+                <span className="text-lg font-black text-white font-mono leading-none">
+                  {combined1230Stats.presentRate}%
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* 3 Interactive Batch Breakdown Cards (A1, A2, A3) */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            {/* Batch A1 */}
+            <button
+              type="button"
+              onClick={() => setActiveBatchFilter(activeBatchFilter === 'A1' ? 'All' : 'A1')}
+              className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                activeBatchFilter === 'A1'
+                  ? 'bg-indigo-600/50 border-indigo-400 ring-2 ring-indigo-400/40 shadow-xs'
+                  : 'bg-white/5 border-white/10 hover:bg-white/10'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-1 mb-1">
+                <span className="text-xs font-black text-indigo-200">Batch A1 (Roll 01-29)</span>
+                <span className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded ${
+                  combined1230Stats.batchBreakdown.A1.isRecorded ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-700/60 text-slate-300'
+                }`}>
+                  {combined1230Stats.batchBreakdown.A1.present}/{combined1230Stats.batchBreakdown.A1.total} Present
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-300 truncate">
+                Faculty: <strong className="text-white">{combined1230Stats.batchBreakdown.A1.teacherName || 'Assigned Faculty'}</strong>
+              </p>
+              <p className="text-[10px] text-indigo-300/80 truncate">{combined1230Stats.batchBreakdown.A1.subject || 'Practical / Lab'}</p>
+            </button>
+
+            {/* Batch A2 */}
+            <button
+              type="button"
+              onClick={() => setActiveBatchFilter(activeBatchFilter === 'A2' ? 'All' : 'A2')}
+              className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                activeBatchFilter === 'A2'
+                  ? 'bg-indigo-600/50 border-indigo-400 ring-2 ring-indigo-400/40 shadow-xs'
+                  : 'bg-white/5 border-white/10 hover:bg-white/10'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-1 mb-1">
+                <span className="text-xs font-black text-indigo-200">Batch A2 (Roll 30-57)</span>
+                <span className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded ${
+                  combined1230Stats.batchBreakdown.A2.isRecorded ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-700/60 text-slate-300'
+                }`}>
+                  {combined1230Stats.batchBreakdown.A2.present}/{combined1230Stats.batchBreakdown.A2.total} Present
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-300 truncate">
+                Faculty: <strong className="text-white">{combined1230Stats.batchBreakdown.A2.teacherName || 'Assigned Faculty'}</strong>
+              </p>
+              <p className="text-[10px] text-indigo-300/80 truncate">{combined1230Stats.batchBreakdown.A2.subject || 'Practical / Lab'}</p>
+            </button>
+
+            {/* Batch A3 */}
+            <button
+              type="button"
+              onClick={() => setActiveBatchFilter(activeBatchFilter === 'A3' ? 'All' : 'A3')}
+              className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                activeBatchFilter === 'A3'
+                  ? 'bg-indigo-600/50 border-indigo-400 ring-2 ring-indigo-400/40 shadow-xs'
+                  : 'bg-white/5 border-white/10 hover:bg-white/10'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-1 mb-1">
+                <span className="text-xs font-black text-indigo-200">Batch A3 (Roll 58-86)</span>
+                <span className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded ${
+                  combined1230Stats.batchBreakdown.A3.isRecorded ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-700/60 text-slate-300'
+                }`}>
+                  {combined1230Stats.batchBreakdown.A3.present}/{combined1230Stats.batchBreakdown.A3.total} Present
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-300 truncate">
+                Faculty: <strong className="text-white">{combined1230Stats.batchBreakdown.A3.teacherName || 'Assigned Faculty'}</strong>
+              </p>
+              <p className="text-[10px] text-indigo-300/80 truncate">{combined1230Stats.batchBreakdown.A3.subject || 'Practical / Lab'}</p>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Dynamic Roll Call Guide Banner - Compact & Refined */}
       {stats.unmarked > 0 ? (
         <div className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 shadow-2xs">
@@ -1009,6 +1189,66 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
         <>
           {/* Control Bar: Search & Full-Word Filter Tabs */}
       <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+        
+        {/* Batch Filter Tabs Strip */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-1 border-b border-slate-100">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs font-extrabold text-slate-700">Batch Filter:</span>
+            <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl flex-wrap">
+              <button
+                type="button"
+                onClick={() => setActiveBatchFilter('All')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  activeBatchFilter === 'All'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                All Batches ({classStudents.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveBatchFilter('A1')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  activeBatchFilter === 'A1'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-indigo-800 hover:bg-indigo-50'
+                }`}
+              >
+                Batch A1 (Roll 01-29)
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveBatchFilter('A2')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  activeBatchFilter === 'A2'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-indigo-800 hover:bg-indigo-50'
+                }`}
+              >
+                Batch A2 (Roll 30-57)
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveBatchFilter('A3')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  activeBatchFilter === 'A3'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-indigo-800 hover:bg-indigo-50'
+                }`}
+              >
+                Batch A3 (Roll 58-86)
+              </button>
+            </div>
+          </div>
+
+          {slotBatch !== 'All' && (
+            <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-800 border border-indigo-200">
+              Active Lecture: Batch {slotBatch}
+            </span>
+          )}
+        </div>
+
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5">
           
           {/* Search Field */}
@@ -1552,12 +1792,71 @@ export const LiveDashboard: React.FC<LiveDashboardProps> = ({
                   <span className="truncate">Enter Roll Number</span>
                 </h3>
                 <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
-                  Type roll numbers of present students &amp; press Enter. Un-entered students are marked Absent automatically.
+                  Type roll numbers of present students &amp; press Enter. Un-entered students in the target batch are marked Absent.
                 </p>
               </div>
               <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200 shrink-0 whitespace-nowrap self-start sm:self-auto shadow-2xs">
                 {currentClass.name}
               </span>
+            </div>
+
+            {/* Batch Filter in Manual Entry Mode */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1 pb-1 border-y border-slate-100">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-xs font-bold text-slate-700">Target Batch:</span>
+                <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setActiveBatchFilter('All')}
+                    className={`px-2 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      activeBatchFilter === 'All'
+                        ? 'bg-slate-900 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    All ({classStudents.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveBatchFilter('A1')}
+                    className={`px-2 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      activeBatchFilter === 'A1'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-indigo-800 hover:bg-indigo-50'
+                    }`}
+                  >
+                    Batch A1 (01-29)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveBatchFilter('A2')}
+                    className={`px-2 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      activeBatchFilter === 'A2'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-indigo-800 hover:bg-indigo-50'
+                    }`}
+                  >
+                    Batch A2 (30-57)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveBatchFilter('A3')}
+                    className={`px-2 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      activeBatchFilter === 'A3'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-indigo-800 hover:bg-indigo-50'
+                    }`}
+                  >
+                    Batch A3 (58-86)
+                  </button>
+                </div>
+              </div>
+
+              {slotBatch !== 'All' && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-800 border border-indigo-200">
+                  Lecture: Batch {slotBatch}
+                </span>
+              )}
             </div>
 
             {/* Form Input with Responsive Non-overlapping Layout */}

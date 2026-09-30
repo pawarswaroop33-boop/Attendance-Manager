@@ -19,7 +19,9 @@ if (!fs.existsSync(DATA_DIR)) {
   } catch (_) {}
 }
 
-app.use(express.json());
+// Increase body parser payload size limit to support large campus state & batch student imports
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Session Token Creation & Verification using HMAC-SHA256
 export interface SessionPayload {
@@ -312,6 +314,23 @@ app.post('/api/campus/session', (req: Request, res: Response) => {
     console.error('[Server] Error saving attendance session:', err?.message || err);
     return res.status(500).json({ error: 'Failed to save attendance session' });
   }
+});
+
+// Error handling middleware for payload size and body parsing errors
+app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
+  if (err?.type === 'entity.too.large' || err?.status === 413) {
+    console.warn('[Server] Request entity too large:', err?.message);
+    return res.status(413).json({
+      error: 'Payload Too Large: The request payload exceeds the allowed size limit.'
+    });
+  }
+  if (err) {
+    console.warn('[Server] Request error:', err?.message || err);
+    return res.status(err.status || 500).json({
+      error: err.message || 'Internal Server Error'
+    });
+  }
+  next();
 });
 
 /* ========================================================================== */

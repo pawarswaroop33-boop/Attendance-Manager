@@ -48,6 +48,7 @@ export interface TimetableSlot {
   teacherName: string;
   roomId: string;
   roomName: string;
+  batch?: 'A1' | 'A2' | 'A3' | 'All' | string; // Practical / Tutorial batch division
 }
 
 export interface Student {
@@ -61,6 +62,7 @@ export interface Student {
   avatarBg?: string;
   classId?: string;
   remarks?: string;
+  batch?: 'A1' | 'A2' | 'A3' | string; // Student assigned batch (e.g. A1, A2, A3)
 }
 
 export interface AttendanceRecord {
@@ -81,6 +83,7 @@ export interface AttendanceSession {
   lectureSlotId?: string;
   timeSlot?: string;
   subject?: string;
+  batch?: 'A1' | 'A2' | 'A3' | 'All' | string; // Practical batch e.g. A1, A2, A3
   records: Record<string, AttendanceRecord>; // studentId -> AttendanceRecord
   lastUpdated: string;
   remarks?: string;

@@ -46,6 +46,7 @@ import {
   isFutureDate
 } from '../utils/dateUtils';
 import { getLecturesForDateAndUser } from '../utils/teacherFilter';
+import { isTimeSlot1230To210, isBatchPracticalSlot, getCombined1230To210Stats } from '../utils/batchUtils';
 
 interface AttendanceCalendarProps {
   sessions: AttendanceSession[];
@@ -160,7 +161,11 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
       let totalPresent = 0;
       let totalAbsent = 0;
 
-      dateSessions.forEach(session => {
+      const batch1230Sessions = dateSessions.filter(s => isTimeSlot1230To210(s.timeSlot || s.sessionName) || isBatchPracticalSlot(s));
+      const nonBatchSessions = dateSessions.filter(s => !batch1230Sessions.includes(s));
+
+      // 1. Process regular non-batch lectures
+      nonBatchSessions.forEach(session => {
         const cls = classes.find(c => c.id === session.classId) || classes[0];
         const classStudents = students.filter(s => cls?.studentIds?.includes(s.id) || false);
         const stats = getSessionStats(session, classStudents.length > 0 ? classStudents : students);
@@ -170,12 +175,20 @@ export const AttendanceCalendar: React.FC<AttendanceCalendarProps> = ({
         totalAbsent += stats.absentCount;
       });
 
+      // 2. Process concurrent 12:30 to 2:10 batch practical sessions combined across A1, A2, and A3
+      if (batch1230Sessions.length > 0) {
+        const combined = getCombined1230To210Stats(dateKey, dateSessions, students, timetable);
+        totalEnrolled += combined.totalStudents;
+        totalPresent += combined.totalPresent;
+        totalAbsent += combined.totalAbsent;
+      }
+
       const avgAttendanceRate = totalEnrolled > 0
         ? Math.round((totalPresent / totalEnrolled) * 100)
         : 0;
 
       summaryMap.set(dateKey, {
-        count: dateSessions.length,
+        count: nonBatchSessions.length + (batch1230Sessions.length > 0 ? 1 : 0),
         totalEnrolled,
         totalPresent,
         totalAbsent,
